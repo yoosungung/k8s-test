@@ -1,0 +1,31 @@
+# Helm Values for Bitnami PostgreSQL Deployment in Test Environment
+# Recommended chart version: 18.6.x (PostgreSQL 18.4.0)
+
+auth:
+  # Enable admin user remote access
+  enablePostgresUser: true
+  postgresPassword: "adminpassword"
+  
+  # Custom database and user setup
+  database: "testdb"
+  username: "testuser"
+  password: "testpassword"
+
+primary:
+  # Resource configurations tailored for lightweight local test environments
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Persistent Volume configurations
+  persistence:
+    enabled: true
+    # Will use the default StorageClass defined in the cluster
+    # storageClass: ""
+    size: 8Gi
+    accessModes:
+      - ReadWriteOnce

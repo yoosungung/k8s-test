@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang-gemma4-31b
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: sglang-gemma4-31b
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sglang-gemma4-31b
+  template:
+    metadata:
+      labels:
+        app: sglang-gemma4-31b
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: sglang
+        image: lmsysorg/sglang:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - python3
+        - -m
+        - sglang.launch_server
+        - --model-path
+        - QuantTrio/gemma-4-31B-it-AWQ
+        - --quantization
+        - awq_marlin
+        - --dtype
+        - bfloat16
+        - --tp-size
+        - "1"
+        - --dp-size
+        - "2"
+        - --mem-fraction-static
+        - "0.92"
+        - --kv-cache-dtype
+        - fp8_e5m2
+        - --context-length
+        - "8192"
+        - --host
+        - 0.0.0.0
+        - --port
+        - "30000"
+        env:
+        # Set Hugging Face cache directory explicitly
+        - name: HF_HOME
+          value: /hf_cache
+        # Set Hugging Face authentication token
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token-secret
+              key: token
+        ports:
+        - containerPort: 30000
+          name: http
+        resources:
+          limits:
+            nvidia.com/gpu: "2"
+          requests:
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: model-cache
+          mountPath: /hf_cache
+      volumes:
+      - name: model-cache
+        hostPath:
+          # Caches downloaded model weights on host to avoid redownloads on restarts
+          path: /Users/suyoo/hf_cache
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang-gemma4-31b
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: sglang-gemma4-31b
+spec:
+  ports:
+  - name: http
+    port: 30000
+    targetPort: 30000
+  selector:
+    app: sglang-gemma4-31b
+  type: ClusterIP
