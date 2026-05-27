@@ -1,0 +1,80 @@
+# ConfigMap: seed model.provider/base_url/default from env before entrypoint runs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-bootstrap-model
+  namespace: ai-agents
+data:
+  bootstrap-model.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    HERMES_HOME="${HERMES_HOME:-/opt/data}"
+    INSTALL_DIR="/opt/hermes"
+    mkdir -p "${HERMES_HOME}"
+    if [ ! -f "${HERMES_HOME}/config.yaml" ]; then
+      cp "${INSTALL_DIR}/cli-config.yaml.example" "${HERMES_HOME}/config.yaml"
+    fi
+    source "${INSTALL_DIR}/.venv/bin/activate"
+    python3 - <<'PY'
+    import os
+    import yaml
+    from pathlib import Path
+
+    home = Path(os.environ["HERMES_HOME"])
+    path = home / "config.yaml"
+    cfg = yaml.safe_load(path.read_text()) or {}
+    model = cfg.setdefault("model", {})
+    model["default"] = os.environ["HERMES_INFERENCE_MODEL"]
+    model["provider"] = os.environ["HERMES_INFERENCE_PROVIDER"]
+    model["base_url"] = os.environ["CUSTOM_BASE_URL"]
+    model.pop("context_length", None)
+    model.pop("api_key", None)
+    path.write_text(
+        yaml.dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    )
+    print(yaml.dump({"model": model}, default_flow_style=False))
+    PY
+---
+# Secret: Gateway tokens and DB connection string
+# IMPORTANT: Replace placeholder values with real secrets before applying
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hermes-gateway-secrets
+  namespace: ai-agents
+type: Opaque
+stringData:
+  DISCORD_BOT_TOKEN: "REPLACE_WITH_DISCORD_BOT_TOKEN"
+  DISCORD_ALLOWED_USERS: "ericberryking"
+  DB_CONNECTION_STRING: "postgresql://hermes:hermespassword@postgresql.postgres.svc.cluster.local:5432/hermesdb"
+  OPENAI_API_KEY: "REPLACE_WITH_OPENAI_API_KEY"
+---
+# PersistentVolume: host-level shared workspace (single-node: didim-gpu)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-shared-workspace
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /agent_shared_workspace
+    type: DirectoryOrCreate
+---
+# PersistentVolumeClaim: shared workspace for all agents
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-shared-workspace
+  namespace: ai-agents
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: pv-shared-workspace
+  storageClassName: ""

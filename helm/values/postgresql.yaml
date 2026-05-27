@@ -5,11 +5,11 @@ auth:
   # Enable admin user remote access
   enablePostgresUser: true
   postgresPassword: "adminpassword"
-  
+
   # Custom database and user setup
-  database: "testdb"
-  username: "testuser"
-  password: "testpassword"
+  database: "hermesdb"
+  username: "hermes"
+  password: "hermespassword"
 
 primary:
   # Resource configurations tailored for lightweight local test environments

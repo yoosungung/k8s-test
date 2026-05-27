@@ -1,0 +1,481 @@
+# Hermes Initial Subagents
+# Uses official image ENTRYPOINT (/opt/hermes/docker/entrypoint.sh)
+# Each subagent runs "sleep infinity" to stay alive as an API server
+# (gateway only needed on master; subagents respond via http service)
+#
+# 1. Coder  2. Wiki Writer  3. Web Searcher  4. k8s Manager
+
+# ==============================================================================
+# COMMON ENV TEMPLATE (applied to each subagent below)
+# - HERMES_HOME=/opt/data  (matches VOLUME in Dockerfile)
+# - HERMES_INFERENCE_MODEL / PROVIDER=custom + CUSTOM_BASE_URL → OpenAI API
+# - DB_CONNECTION_STRING → shared PostgreSQL (hermesdb)
+# ==============================================================================
+
+# ==============================================================================
+# 1. CODER SUBAGENT
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-subagent-coder
+  namespace: ai-agents
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-subagent-coder
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-subagent-coder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes-subagent-coder
+  template:
+    metadata:
+      labels:
+        app: hermes-subagent-coder
+    spec:
+      initContainers:
+        - name: bootstrap-model-config
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: bootstrap-scripts
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: hermes-subagent
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          # Keep container alive; master delegates tasks via http API or exec
+          args: ["sleep", "infinity"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: OPENAI_API_KEY
+            - name: HERMES_PROFILE
+              value: "coder"
+            - name: DB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DB_CONNECTION_STRING
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: shared-workspace
+              mountPath: /workspace/shared
+      volumes:
+        - name: bootstrap-scripts
+          configMap:
+            name: hermes-bootstrap-model
+            defaultMode: 0755
+        - name: subagent-data
+          persistentVolumeClaim:
+            claimName: pvc-subagent-coder
+        - name: shared-workspace
+          persistentVolumeClaim:
+            claimName: pvc-shared-workspace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-subagent-coder
+  namespace: ai-agents
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: hermes-subagent-coder
+---
+# ==============================================================================
+# 2. WIKI WRITER SUBAGENT
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-subagent-wiki
+  namespace: ai-agents
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-subagent-wiki
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-subagent-wiki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes-subagent-wiki
+  template:
+    metadata:
+      labels:
+        app: hermes-subagent-wiki
+    spec:
+      initContainers:
+        - name: bootstrap-model-config
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: bootstrap-scripts
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: hermes-subagent
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          args: ["sleep", "infinity"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: OPENAI_API_KEY
+            - name: HERMES_PROFILE
+              value: "wiki-writer"
+            - name: DB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DB_CONNECTION_STRING
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: shared-workspace
+              mountPath: /workspace/shared
+      volumes:
+        - name: bootstrap-scripts
+          configMap:
+            name: hermes-bootstrap-model
+            defaultMode: 0755
+        - name: subagent-data
+          persistentVolumeClaim:
+            claimName: pvc-subagent-wiki
+        - name: shared-workspace
+          persistentVolumeClaim:
+            claimName: pvc-shared-workspace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-subagent-wiki
+  namespace: ai-agents
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: hermes-subagent-wiki
+---
+# ==============================================================================
+# 3. WEB SEARCHER SUBAGENT
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-subagent-searcher
+  namespace: ai-agents
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-subagent-searcher
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-subagent-searcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes-subagent-searcher
+  template:
+    metadata:
+      labels:
+        app: hermes-subagent-searcher
+    spec:
+      initContainers:
+        - name: bootstrap-model-config
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: bootstrap-scripts
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: hermes-subagent
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          args: ["sleep", "infinity"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: OPENAI_API_KEY
+            - name: HERMES_PROFILE
+              value: "web-searcher"
+            - name: DB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DB_CONNECTION_STRING
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: shared-workspace
+              mountPath: /workspace/shared
+      volumes:
+        - name: bootstrap-scripts
+          configMap:
+            name: hermes-bootstrap-model
+            defaultMode: 0755
+        - name: subagent-data
+          persistentVolumeClaim:
+            claimName: pvc-subagent-searcher
+        - name: shared-workspace
+          persistentVolumeClaim:
+            claimName: pvc-shared-workspace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-subagent-searcher
+  namespace: ai-agents
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: hermes-subagent-searcher
+---
+# ==============================================================================
+# 4. K8S MANAGER SUBAGENT (RBAC + Deployment)
+# ==============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes-k8s-manager-sa
+  namespace: ai-agents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hermes-k8s-manager-role
+rules:
+  - apiGroups: ["", "apps", "batch", "extensions"]
+    resources:
+      - pods
+      - pods/log
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+      - jobs
+      - cronjobs
+      - services
+      - endpoints
+      - namespaces
+      - configmaps
+      - persistentvolumeclaims
+      - events
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hermes-k8s-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: hermes-k8s-manager-sa
+    namespace: ai-agents
+roleRef:
+  kind: ClusterRole
+  name: hermes-k8s-manager-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-subagent-k8s
+  namespace: ai-agents
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-subagent-k8s
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-subagent-k8s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes-subagent-k8s
+  template:
+    metadata:
+      labels:
+        app: hermes-subagent-k8s
+    spec:
+      serviceAccountName: hermes-k8s-manager-sa
+      initContainers:
+        - name: bootstrap-model-config
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: bootstrap-scripts
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: hermes-subagent
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          args: ["sleep", "infinity"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: OPENAI_API_KEY
+            - name: HERMES_PROFILE
+              value: "k8s-manager"
+            - name: DB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DB_CONNECTION_STRING
+          volumeMounts:
+            - name: subagent-data
+              mountPath: /opt/data
+            - name: shared-workspace
+              mountPath: /workspace/shared
+      volumes:
+        - name: bootstrap-scripts
+          configMap:
+            name: hermes-bootstrap-model
+            defaultMode: 0755
+        - name: subagent-data
+          persistentVolumeClaim:
+            claimName: pvc-subagent-k8s
+        - name: shared-workspace
+          persistentVolumeClaim:
+            claimName: pvc-shared-workspace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-subagent-k8s
+  namespace: ai-agents
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: hermes-subagent-k8s

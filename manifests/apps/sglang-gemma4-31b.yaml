@@ -41,12 +41,15 @@ spec:
         - --kv-cache-dtype
         - fp8_e5m2
         - --context-length
-        - "8192"
+        - "16384"
+        - --allow-auto-truncate
         - --host
         - 0.0.0.0
         - --port
         - "30000"
         env:
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: expandable_segments:True
         # Set Hugging Face cache directory explicitly
         - name: HF_HOME
           value: /hf_cache

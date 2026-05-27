@@ -78,6 +78,12 @@ fi
 log_info "Deleting standalone secrets..."
 kubectl delete secret hf-token-secret -n llm-serving --ignore-not-found || true
 
+# 2.7 Delete cluster-scoped RBAC resources (not tied to any namespace)
+log_info "Deleting cluster-scoped RBAC resources..."
+kubectl delete clusterrolebinding hermes-k8s-manager-binding --ignore-not-found || true
+kubectl delete clusterrole hermes-k8s-manager-role --ignore-not-found || true
+
+
 # 3. Teardown Infrastructure Manifests
 log_info "Deleting infrastructure manifests..."
 INFRA_DIR="${ROOT_DIR}/manifests/infra"

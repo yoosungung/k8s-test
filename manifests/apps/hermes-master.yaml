@@ -1,0 +1,134 @@
+# Hermes Master Agent - StatefulSet + Service
+# gateway + dashboard run via official ENTRYPOINT (/opt/hermes/docker/entrypoint.sh)
+# HERMES_DASHBOARD=1 activates the background dashboard automatically
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes-master-sa
+  namespace: ai-agents
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hermes-master
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-master
+spec:
+  serviceName: "hermes-master"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes-master
+  template:
+    metadata:
+      labels:
+        app: hermes-master
+    spec:
+      serviceAccountName: hermes-master-sa
+      initContainers:
+        - name: bootstrap-model-config
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
+          env:
+            - name: HERMES_HOME
+              value: "/opt/data"
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+          volumeMounts:
+            - name: master-data
+              mountPath: /opt/data
+            - name: bootstrap-scripts
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: hermes-master
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          # Use image ENTRYPOINT; pass "gateway" as CMD to start the messaging gateway
+          args: ["gateway"]
+          ports:
+            - containerPort: 9119
+              name: dashboard
+          env:
+            # Data directory (matches VOLUME in Dockerfile)
+            - name: HERMES_HOME
+              value: "/opt/data"
+            # Automatically start the dashboard as a background side-process
+            - name: HERMES_DASHBOARD
+              value: "1"
+            - name: HERMES_DASHBOARD_HOST
+              value: "0.0.0.0"
+            - name: HERMES_DASHBOARD_PORT
+              value: "9119"
+            # LLM inference via OpenAI-compatible custom endpoint
+            - name: HERMES_INFERENCE_MODEL
+              value: "gpt-5.4-mini"
+            - name: HERMES_INFERENCE_PROVIDER
+              value: "custom"
+            - name: CUSTOM_BASE_URL
+              value: "https://api.openai.com/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: OPENAI_API_KEY
+            # Discord gateway
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DISCORD_BOT_TOKEN
+            - name: DISCORD_ALLOWED_USERS
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DISCORD_ALLOWED_USERS
+            # PostgreSQL backend
+            - name: DB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: DB_CONNECTION_STRING
+          volumeMounts:
+            - name: master-data
+              mountPath: /opt/data
+            - name: shared-workspace
+              mountPath: /workspace/shared
+      volumes:
+        - name: bootstrap-scripts
+          configMap:
+            name: hermes-bootstrap-model
+            defaultMode: 0755
+        - name: shared-workspace
+          persistentVolumeClaim:
+            claimName: pvc-shared-workspace
+  volumeClaimTemplates:
+    - metadata:
+        name: master-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-master
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-master
+spec:
+  ports:
+    - port: 9119
+      targetPort: 9119
+      name: dashboard
+  selector:
+    app: hermes-master
+  type: ClusterIP
