@@ -34,20 +34,7 @@ data:
     )
     print(yaml.dump({"model": model}, default_flow_style=False))
     PY
----
-# Secret: Gateway tokens and DB connection string
-# IMPORTANT: Replace placeholder values with real secrets before applying
-apiVersion: v1
-kind: Secret
-metadata:
-  name: hermes-gateway-secrets
-  namespace: ai-agents
-type: Opaque
-stringData:
-  DISCORD_BOT_TOKEN: "REPLACE_WITH_DISCORD_BOT_TOKEN"
-  DISCORD_ALLOWED_USERS: "ericberryking"
-  DB_CONNECTION_STRING: "postgresql://hermes:hermespassword@postgresql.postgres.svc.cluster.local:5432/hermesdb"
-  OPENAI_API_KEY: "REPLACE_WITH_OPENAI_API_KEY"
+# Secret hermes-gateway-secrets is created by scripts/deploy.sh (see hermes-gateway-secrets.yaml)
 ---
 # PersistentVolume: host-level shared workspace (single-node: didim-gpu)
 apiVersion: v1

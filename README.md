@@ -36,6 +36,18 @@ To deploy all configurations, infrastructure elements, and applications in the c
 ./scripts/deploy.sh
 ```
 
+For Hermes agents, you can provide secrets via environment variables (non-interactive):
+```bash
+export DISCORD_BOT_TOKEN='your-discord-bot-token'
+export OPENAI_API_KEY='your-openai-api-key'
+export HERMES_API_SERVER_KEY="$(openssl rand -hex 32)"   # optional: auto-generated if omitted in prompts
+# optional:
+# export DISCORD_ALLOWED_USERS='your-discord-username'
+# export DB_CONNECTION_STRING='postgresql://...'
+
+./scripts/deploy.sh
+```
+
 ### Clean Up / Teardown
 To remove all components and clean up the namespaces created for testing:
 ```bash

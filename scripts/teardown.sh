@@ -77,6 +77,7 @@ fi
 # 2.5 Delete manually created secrets
 log_info "Deleting standalone secrets..."
 kubectl delete secret hf-token-secret -n llm-serving --ignore-not-found || true
+kubectl delete secret hermes-gateway-secrets -n ai-agents --ignore-not-found || true
 
 # 2.7 Delete cluster-scoped RBAC resources (not tied to any namespace)
 log_info "Deleting cluster-scoped RBAC resources..."

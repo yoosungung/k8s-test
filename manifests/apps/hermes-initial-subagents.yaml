@@ -1,7 +1,7 @@
 # Hermes Initial Subagents
 # Uses official image ENTRYPOINT (/opt/hermes/docker/entrypoint.sh)
-# Each subagent runs "sleep infinity" to stay alive as an API server
-# (gateway only needed on master; subagents respond via http service)
+# Each subagent runs "gateway run" with API server enabled
+# so master can call each subagent over in-cluster HTTP.
 #
 # 1. Coder  2. Wiki Writer  3. Web Searcher  4. k8s Manager
 
@@ -67,8 +67,7 @@ spec:
         - name: hermes-subagent
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
-          # Keep container alive; master delegates tasks via http API or exec
-          args: ["sleep", "infinity"]
+          args: ["gateway", "run"]
           env:
             - name: HERMES_HOME
               value: "/opt/data"
@@ -90,6 +89,17 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DB_CONNECTION_STRING
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: API_SERVER_PORT
+              value: "8000"
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_API_SERVER_KEY
           volumeMounts:
             - name: subagent-data
               mountPath: /opt/data
@@ -174,7 +184,7 @@ spec:
         - name: hermes-subagent
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
-          args: ["sleep", "infinity"]
+          args: ["gateway", "run"]
           env:
             - name: HERMES_HOME
               value: "/opt/data"
@@ -196,6 +206,17 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DB_CONNECTION_STRING
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: API_SERVER_PORT
+              value: "8000"
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_API_SERVER_KEY
           volumeMounts:
             - name: subagent-data
               mountPath: /opt/data
@@ -280,7 +301,7 @@ spec:
         - name: hermes-subagent
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
-          args: ["sleep", "infinity"]
+          args: ["gateway", "run"]
           env:
             - name: HERMES_HOME
               value: "/opt/data"
@@ -302,6 +323,17 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DB_CONNECTION_STRING
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: API_SERVER_PORT
+              value: "8000"
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_API_SERVER_KEY
           volumeMounts:
             - name: subagent-data
               mountPath: /opt/data
@@ -429,7 +461,7 @@ spec:
         - name: hermes-subagent
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
-          args: ["sleep", "infinity"]
+          args: ["gateway", "run"]
           env:
             - name: HERMES_HOME
               value: "/opt/data"
@@ -451,6 +483,17 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DB_CONNECTION_STRING
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: API_SERVER_PORT
+              value: "8000"
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_API_SERVER_KEY
           volumeMounts:
             - name: subagent-data
               mountPath: /opt/data

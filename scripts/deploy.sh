@@ -22,9 +22,41 @@ log_error() {
     echo -e "${RED}[ERROR]$(date +'%Y-%m-%d %H:%M:%S') $1${NC}"
 }
 
+HERMES_SECRET_NAME="hermes-gateway-secrets"
+HERMES_NAMESPACE="ai-agents"
+HERMES_DEFAULT_DISCORD_ALLOWED_USERS="ericberryking"
+HERMES_DEFAULT_DB_CONNECTION_STRING="postgresql://hermes:hermespassword@postgresql.postgres.svc.cluster.local:5432/hermesdb"
+
+apply_hermes_gateway_secret() {
+    local discord_token="$1"
+    local openai_key="$2"
+    local api_server_key="$3"
+    local discord_allowed_users="${4:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
+    local db_connection_string="${5:-${HERMES_DEFAULT_DB_CONNECTION_STRING}}"
+
+    kubectl create secret generic "${HERMES_SECRET_NAME}" \
+        --namespace "${HERMES_NAMESPACE}" \
+        --from-literal=DISCORD_BOT_TOKEN="${discord_token}" \
+        --from-literal=OPENAI_API_KEY="${openai_key}" \
+        --from-literal=HERMES_API_SERVER_KEY="${api_server_key}" \
+        --from-literal=DISCORD_ALLOWED_USERS="${discord_allowed_users}" \
+        --from-literal=DB_CONNECTION_STRING="${db_connection_string}" \
+        --dry-run=client -o yaml | kubectl apply -f -
+}
+
+generate_hermes_api_server_key() {
+    if command -v openssl &> /dev/null; then
+        openssl rand -hex 32
+    else
+        # Fallback when openssl is unavailable (API key must be >= 8 chars)
+        date +%s | shasum -a 256 | cut -c1-32
+    fi
+}
+
 # Resolve script directory to allow running this script from anywhere
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+HERMES_SECRETS_PLACEHOLDER="${ROOT_DIR}/manifests/apps/hermes-gateway-secrets.yaml"
 
 log_info "Verifying prerequisites..."
 
@@ -115,12 +147,66 @@ else
     log_info "hf-token-secret already exists in 'llm-serving' namespace."
 fi
 
+# 3.6 Set up Hermes gateway secrets if needed
+log_info "Checking Hermes gateway secret..."
+if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev/null; then
+    if [ -n "${OPENAI_API_KEY:-}" ] && [ -n "${DISCORD_BOT_TOKEN:-}" ]; then
+        hermes_api_key="${HERMES_API_SERVER_KEY:-}"
+        if [ -z "${hermes_api_key}" ]; then
+            hermes_api_key="$(generate_hermes_api_server_key)"
+            log_info "HERMES_API_SERVER_KEY not set; generated a new key."
+        fi
+        log_info "Creating ${HERMES_SECRET_NAME} from environment variables..."
+        apply_hermes_gateway_secret \
+            "${DISCORD_BOT_TOKEN}" \
+            "${OPENAI_API_KEY}" \
+            "${hermes_api_key}" \
+            "${DISCORD_ALLOWED_USERS:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
+            "${DB_CONNECTION_STRING:-${HERMES_DEFAULT_DB_CONNECTION_STRING}}"
+    elif [[ "${1:-}" != "--force" ]] && [ -t 0 ]; then
+        echo -e "${YELLOW}[PROMPT] Hermes gateway secret not found.${NC}"
+        read -rsp "OpenAI API key (OPENAI_API_KEY): " openai_key_input
+        echo ""
+        if [ -z "${openai_key_input}" ]; then
+            log_warn "OpenAI API key is required. Applying placeholder secret..."
+            kubectl apply -f "${HERMES_SECRETS_PLACEHOLDER}"
+        else
+            read -rsp "Discord bot token (leave empty for placeholder): " discord_token_input
+            echo ""
+            if [ -z "${discord_token_input}" ]; then
+                discord_token_input="REPLACE_WITH_DISCORD_BOT_TOKEN"
+            fi
+            read -rsp "Hermes API server key (leave empty to auto-generate): " api_server_key_input
+            echo ""
+            if [ -z "${api_server_key_input}" ]; then
+                api_server_key_input="$(generate_hermes_api_server_key)"
+                log_info "Generated HERMES_API_SERVER_KEY."
+            fi
+            read -rp "Discord allowed users [${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}]: " discord_users_input
+            read -rp "DB connection string [default]: " db_connection_input
+            log_info "Creating ${HERMES_SECRET_NAME} with provided values..."
+            apply_hermes_gateway_secret \
+                "${discord_token_input}" \
+                "${openai_key_input}" \
+                "${api_server_key_input}" \
+                "${discord_users_input:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
+                "${db_connection_input:-${HERMES_DEFAULT_DB_CONNECTION_STRING}}"
+        fi
+    else
+        log_warn "Running in non-interactive/forced mode without Hermes env vars. Applying placeholder secret..."
+        kubectl apply -f "${HERMES_SECRETS_PLACEHOLDER}"
+    fi
+else
+    log_info "${HERMES_SECRET_NAME} already exists in '${HERMES_NAMESPACE}' namespace."
+fi
+
 # 4. Deploy Application Manifests
 log_info "Applying application manifests..."
 APPS_DIR="${ROOT_DIR}/manifests/apps"
 if [ -d "${APPS_DIR}" ] && [ "$(ls -A "${APPS_DIR}")" ]; then
     find "${APPS_DIR}" -name "*.yaml" -o -name "*.yml" | while read -r yaml_file; do
-        if [ "$(basename "${yaml_file}")" != "hf-secret.yaml" ]; then
+        base_name="$(basename "${yaml_file}")"
+        if [ "${base_name}" != "hf-secret.yaml" ] && [ "${base_name}" != "hermes-gateway-secrets.yaml" ]; then
             log_info "Applying: $(basename "${yaml_file}")"
             kubectl apply -f "${yaml_file}"
         fi

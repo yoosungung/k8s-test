@@ -50,9 +50,11 @@ spec:
         - name: hermes-master
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
-          # Use image ENTRYPOINT; pass "gateway" as CMD to start the messaging gateway
-          args: ["gateway"]
+          # Use image ENTRYPOINT; run persistent gateway process
+          args: ["gateway", "run"]
           ports:
+            - containerPort: 8642
+              name: api
             - containerPort: 9119
               name: dashboard
           env:
@@ -66,6 +68,18 @@ spec:
               value: "0.0.0.0"
             - name: HERMES_DASHBOARD_PORT
               value: "9119"
+            # Expose API server for internal agent-to-agent communication
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: API_SERVER_PORT
+              value: "8642"
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_API_SERVER_KEY
             # LLM inference via OpenAI-compatible custom endpoint
             - name: HERMES_INFERENCE_MODEL
               value: "gpt-5.4-mini"
@@ -95,6 +109,15 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DB_CONNECTION_STRING
+            # In-cluster subagent endpoints (OpenAI-compatible Hermes API)
+            - name: SUBAGENT_CODER_URL
+              value: "http://hermes-subagent-coder.ai-agents.svc.cluster.local:8000/v1"
+            - name: SUBAGENT_WIKI_URL
+              value: "http://hermes-subagent-wiki.ai-agents.svc.cluster.local:8000/v1"
+            - name: SUBAGENT_SEARCHER_URL
+              value: "http://hermes-subagent-searcher.ai-agents.svc.cluster.local:8000/v1"
+            - name: SUBAGENT_K8S_URL
+              value: "http://hermes-subagent-k8s.ai-agents.svc.cluster.local:8000/v1"
           volumeMounts:
             - name: master-data
               mountPath: /opt/data
@@ -126,6 +149,9 @@ metadata:
     app.kubernetes.io/name: hermes-master
 spec:
   ports:
+    - port: 8642
+      targetPort: 8642
+      name: api
     - port: 9119
       targetPort: 9119
       name: dashboard
