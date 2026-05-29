@@ -22,8 +22,13 @@ data:
 
     home = Path(os.environ["HERMES_HOME"])
     path = home / "config.yaml"
-    cfg = yaml.safe_load(path.read_text()) or {}
-    model = cfg.setdefault("model", {})
+    raw = yaml.safe_load(path.read_text())
+    cfg = raw if isinstance(raw, dict) else {}
+
+    model = cfg.get("model")
+    if not isinstance(model, dict):
+        model = {}
+    cfg["model"] = model
     model["default"] = os.environ["HERMES_INFERENCE_MODEL"]
     model["provider"] = os.environ["HERMES_INFERENCE_PROVIDER"]
     base_url = os.environ.get("CUSTOM_BASE_URL", "")
@@ -34,9 +39,15 @@ data:
     model.pop("context_length", None)
     model.pop("api_key", None)
 
-    terminal = cfg.setdefault("terminal", {})
-    passthrough = terminal.setdefault("env_passthrough", [])
-    for var in ["GITHUB_TOKEN", "OPENAI_API_KEY", "LINEAR_API_KEY"]:
+    terminal = cfg.get("terminal")
+    if not isinstance(terminal, dict):
+        terminal = {}
+    cfg["terminal"] = terminal
+    passthrough = terminal.get("env_passthrough")
+    if not isinstance(passthrough, list):
+        passthrough = []
+    terminal["env_passthrough"] = passthrough
+    for var in ["GITHUB_TOKEN", "OPENAI_API_KEY", "LINEAR_API_KEY", "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"]:
         if var not in passthrough:
             passthrough.append(var)
 

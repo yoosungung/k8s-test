@@ -33,6 +33,8 @@ apply_hermes_gateway_secret() {
     local discord_allowed_users="${4:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
     local github_token="${5:-${GITHUB_TOKEN:-REPLACE_WITH_GITHUB_TOKEN}}"
     local linear_api_key="${6:-${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}}"
+    local naver_client_id="${7:-${NAVER_CLIENT_ID:-REPLACE_WITH_NAVER_CLIENT_ID}}"
+    local naver_client_secret="${8:-${NAVER_CLIENT_SECRET:-REPLACE_WITH_NAVER_CLIENT_SECRET}}"
 
     kubectl create secret generic "${HERMES_SECRET_NAME}" \
         --namespace "${HERMES_NAMESPACE}" \
@@ -42,6 +44,8 @@ apply_hermes_gateway_secret() {
         --from-literal=DISCORD_ALLOWED_USERS="${discord_allowed_users}" \
         --from-literal=GITHUB_TOKEN="${github_token}" \
         --from-literal=LINEAR_API_KEY="${linear_api_key}" \
+        --from-literal=NAVER_CLIENT_ID="${naver_client_id}" \
+        --from-literal=NAVER_CLIENT_SECRET="${naver_client_secret}" \
         --dry-run=client -o yaml | kubectl apply -f -
 }
 
@@ -185,7 +189,9 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
             "${hermes_api_key}" \
             "${DISCORD_ALLOWED_USERS:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
             "${GITHUB_TOKEN:-REPLACE_WITH_GITHUB_TOKEN}" \
-            "${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}"
+            "${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}" \
+            "${NAVER_CLIENT_ID:-REPLACE_WITH_NAVER_CLIENT_ID}" \
+            "${NAVER_CLIENT_SECRET:-REPLACE_WITH_NAVER_CLIENT_SECRET}"
     elif [[ "${1:-}" != "--force" ]] && [ -t 0 ]; then
         echo -e "${YELLOW}[PROMPT] Hermes gateway secret not found.${NC}"
         read -rsp "OpenAI API key (OPENAI_API_KEY): " openai_key_input
@@ -210,6 +216,10 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
             echo ""
             read -rsp "Linear API key (LINEAR_API_KEY) [leave empty for placeholder]: " linear_api_key_input
             echo ""
+            read -rsp "Naver client ID (NAVER_CLIENT_ID) [leave empty for placeholder]: " naver_client_id_input
+            echo ""
+            read -rsp "Naver client secret (NAVER_CLIENT_SECRET) [leave empty for placeholder]: " naver_client_secret_input
+            echo ""
             log_info "Creating ${HERMES_SECRET_NAME} with provided values..."
             apply_hermes_gateway_secret \
                 "${discord_token_input}" \
@@ -217,7 +227,9 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
                 "${api_server_key_input}" \
                 "${discord_users_input:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
                 "${github_token_input:-REPLACE_WITH_GITHUB_TOKEN}" \
-                "${linear_api_key_input:-REPLACE_WITH_LINEAR_API_KEY}"
+                "${linear_api_key_input:-REPLACE_WITH_LINEAR_API_KEY}" \
+                "${naver_client_id_input:-REPLACE_WITH_NAVER_CLIENT_ID}" \
+                "${naver_client_secret_input:-REPLACE_WITH_NAVER_CLIENT_SECRET}"
         fi
     else
         log_warn "Running in non-interactive/forced mode without Hermes env vars. Applying placeholder secret..."
