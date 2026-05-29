@@ -33,11 +33,30 @@ data:
         model.pop("base_url", None)
     model.pop("context_length", None)
     model.pop("api_key", None)
+
+    terminal = cfg.setdefault("terminal", {})
+    passthrough = terminal.setdefault("env_passthrough", [])
+    for var in ["GITHUB_TOKEN", "OPENAI_API_KEY", "LINEAR_API_KEY"]:
+        if var not in passthrough:
+            passthrough.append(var)
+
     path.write_text(
         yaml.dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     )
     print(yaml.dump({"model": model}, default_flow_style=False))
     PY
+  patch-openai.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    echo "Checking for OpenAI SDK responses.py to patch..."
+    TARGET_FILE=$(find /opt/hermes/.venv/lib -name "_responses.py" -path "*/openai/lib/_parsing/*" | head -n 1)
+    if [ -n "${TARGET_FILE}" ] && [ -f "${TARGET_FILE}" ]; then
+        echo "Patching ${TARGET_FILE}..."
+        sed -i 's/for output in response\.output:/for output in (response.output or []):/g' "${TARGET_FILE}"
+        echo "Patch applied successfully."
+    else
+        echo "OpenAI SDK responses.py not found or already patched."
+    fi
 # Secret hermes-gateway-secrets is created by scripts/deploy.sh (see hermes-gateway-secrets.yaml)
 ---
 # PersistentVolume: host-level shared workspace (single-node: didim-gpu)

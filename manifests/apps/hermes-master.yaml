@@ -68,8 +68,13 @@ spec:
         - name: hermes-master
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
-          # Use image ENTRYPOINT; run persistent gateway process
-          args: ["gateway", "run"]
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              # Patch the openai library responses file to prevent NoneType is not iterable error
+              /etc/cont-init.d/99-patch-openai.sh || true
+              # Execute original entrypoint script with default arguments
+              exec /opt/hermes/docker/entrypoint.sh gateway run
           ports:
             - containerPort: 8642
               name: api
@@ -121,6 +126,16 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DISCORD_ALLOWED_USERS
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: GITHUB_TOKEN
+            - name: LINEAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: LINEAR_API_KEY
             # Session/memory: SQLite under HERMES_HOME (/opt/data/state.db), not PostgreSQL
             # In-cluster subagent endpoints (OpenAI-compatible Hermes API)
             - name: SUBAGENT_CODER_URL
@@ -139,6 +154,9 @@ spec:
             - name: hermes-auth-volume
               mountPath: /opt/data/auth.json
               subPath: auth.json
+            - name: bootstrap-scripts
+              mountPath: /etc/cont-init.d/99-patch-openai.sh
+              subPath: patch-openai.sh
       volumes:
         - name: bootstrap-scripts
           configMap:

@@ -31,6 +31,8 @@ apply_hermes_gateway_secret() {
     local openai_key="$2"
     local api_server_key="$3"
     local discord_allowed_users="${4:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
+    local github_token="${5:-${GITHUB_TOKEN:-REPLACE_WITH_GITHUB_TOKEN}}"
+    local linear_api_key="${6:-${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}}"
 
     kubectl create secret generic "${HERMES_SECRET_NAME}" \
         --namespace "${HERMES_NAMESPACE}" \
@@ -38,6 +40,8 @@ apply_hermes_gateway_secret() {
         --from-literal=OPENAI_API_KEY="${openai_key}" \
         --from-literal=HERMES_API_SERVER_KEY="${api_server_key}" \
         --from-literal=DISCORD_ALLOWED_USERS="${discord_allowed_users}" \
+        --from-literal=GITHUB_TOKEN="${github_token}" \
+        --from-literal=LINEAR_API_KEY="${linear_api_key}" \
         --dry-run=client -o yaml | kubectl apply -f -
 }
 
@@ -179,7 +183,9 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
             "${DISCORD_BOT_TOKEN}" \
             "${OPENAI_API_KEY}" \
             "${hermes_api_key}" \
-            "${DISCORD_ALLOWED_USERS:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
+            "${DISCORD_ALLOWED_USERS:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
+            "${GITHUB_TOKEN:-REPLACE_WITH_GITHUB_TOKEN}" \
+            "${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}"
     elif [[ "${1:-}" != "--force" ]] && [ -t 0 ]; then
         echo -e "${YELLOW}[PROMPT] Hermes gateway secret not found.${NC}"
         read -rsp "OpenAI API key (OPENAI_API_KEY): " openai_key_input
@@ -200,12 +206,18 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
                 log_info "Generated HERMES_API_SERVER_KEY."
             fi
             read -rp "Discord allowed users [${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}]: " discord_users_input
+            read -rsp "GitHub token (GITHUB_TOKEN) [leave empty for placeholder]: " github_token_input
+            echo ""
+            read -rsp "Linear API key (LINEAR_API_KEY) [leave empty for placeholder]: " linear_api_key_input
+            echo ""
             log_info "Creating ${HERMES_SECRET_NAME} with provided values..."
             apply_hermes_gateway_secret \
                 "${discord_token_input}" \
                 "${openai_key_input}" \
                 "${api_server_key_input}" \
-                "${discord_users_input:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
+                "${discord_users_input:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
+                "${github_token_input:-REPLACE_WITH_GITHUB_TOKEN}" \
+                "${linear_api_key_input:-REPLACE_WITH_LINEAR_API_KEY}"
         fi
     else
         log_warn "Running in non-interactive/forced mode without Hermes env vars. Applying placeholder secret..."
