@@ -29,3 +29,11 @@ primary:
     size: 8Gi
     accessModes:
       - ReadWriteOnce
+
+  # Enable pgvector in hermesdb during first cluster initialization.
+  # Note: initdb scripts run only when the data directory is empty.
+  initdb:
+    scripts:
+      01-enable-pgvector.sql: |
+        \connect hermesdb;
+        CREATE EXTENSION IF NOT EXISTS vector;

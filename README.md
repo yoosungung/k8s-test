@@ -43,7 +43,6 @@ export OPENAI_API_KEY='your-openai-api-key'
 export HERMES_API_SERVER_KEY="$(openssl rand -hex 32)"   # optional: auto-generated if omitted in prompts
 # optional:
 # export DISCORD_ALLOWED_USERS='your-discord-username'
-# export DB_CONNECTION_STRING='postgresql://...'
 
 ./scripts/deploy.sh
 ```

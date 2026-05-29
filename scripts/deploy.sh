@@ -25,14 +25,12 @@ log_error() {
 HERMES_SECRET_NAME="hermes-gateway-secrets"
 HERMES_NAMESPACE="ai-agents"
 HERMES_DEFAULT_DISCORD_ALLOWED_USERS="ericberryking"
-HERMES_DEFAULT_DB_CONNECTION_STRING="postgresql://hermes:hermespassword@postgresql.postgres.svc.cluster.local:5432/hermesdb"
 
 apply_hermes_gateway_secret() {
     local discord_token="$1"
     local openai_key="$2"
     local api_server_key="$3"
     local discord_allowed_users="${4:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
-    local db_connection_string="${5:-${HERMES_DEFAULT_DB_CONNECTION_STRING}}"
 
     kubectl create secret generic "${HERMES_SECRET_NAME}" \
         --namespace "${HERMES_NAMESPACE}" \
@@ -40,7 +38,6 @@ apply_hermes_gateway_secret() {
         --from-literal=OPENAI_API_KEY="${openai_key}" \
         --from-literal=HERMES_API_SERVER_KEY="${api_server_key}" \
         --from-literal=DISCORD_ALLOWED_USERS="${discord_allowed_users}" \
-        --from-literal=DB_CONNECTION_STRING="${db_connection_string}" \
         --dry-run=client -o yaml | kubectl apply -f -
 }
 
@@ -50,6 +47,25 @@ generate_hermes_api_server_key() {
     else
         # Fallback when openssl is unavailable (API key must be >= 8 chars)
         date +%s | shasum -a 256 | cut -c1-32
+    fi
+}
+
+ensure_pgvector_extension() {
+    local namespace="postgres"
+    local statefulset_name="postgresql"
+    local pod_name="postgresql-0"
+    local target_db="hermesdb"
+
+    log_info "Waiting for PostgreSQL rollout to ensure pgvector is enabled..."
+    kubectl rollout status statefulset/"${statefulset_name}" -n "${namespace}" --timeout=180s
+    kubectl wait --for=condition=Ready pod/"${pod_name}" -n "${namespace}" --timeout=180s
+
+    log_info "Ensuring pgvector extension exists in database '${target_db}'..."
+    if kubectl exec -n "${namespace}" "${pod_name}" -- /bin/bash -lc \
+        "export PGPASSWORD=\"\${POSTGRES_PASSWORD}\" && psql -v ON_ERROR_STOP=1 -U postgres -d \"${target_db}\" -c 'CREATE EXTENSION IF NOT EXISTS vector;'"; then
+        log_info "pgvector extension is enabled in '${target_db}'."
+    else
+        log_warn "Failed to enable pgvector automatically. Check PostgreSQL image compatibility and run CREATE EXTENSION manually."
     fi
 }
 
@@ -120,6 +136,8 @@ if [ "$HAS_HELM" = true ]; then
         --namespace postgres \
         --create-namespace \
         -f "${ROOT_DIR}/helm/values/postgresql.yaml"
+
+    ensure_pgvector_extension
 fi
 
 # 3.5 Set up Hugging Face Token Secret if needed
@@ -161,8 +179,7 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
             "${DISCORD_BOT_TOKEN}" \
             "${OPENAI_API_KEY}" \
             "${hermes_api_key}" \
-            "${DISCORD_ALLOWED_USERS:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
-            "${DB_CONNECTION_STRING:-${HERMES_DEFAULT_DB_CONNECTION_STRING}}"
+            "${DISCORD_ALLOWED_USERS:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
     elif [[ "${1:-}" != "--force" ]] && [ -t 0 ]; then
         echo -e "${YELLOW}[PROMPT] Hermes gateway secret not found.${NC}"
         read -rsp "OpenAI API key (OPENAI_API_KEY): " openai_key_input
@@ -183,14 +200,12 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
                 log_info "Generated HERMES_API_SERVER_KEY."
             fi
             read -rp "Discord allowed users [${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}]: " discord_users_input
-            read -rp "DB connection string [default]: " db_connection_input
             log_info "Creating ${HERMES_SECRET_NAME} with provided values..."
             apply_hermes_gateway_secret \
                 "${discord_token_input}" \
                 "${openai_key_input}" \
                 "${api_server_key_input}" \
-                "${discord_users_input:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}" \
-                "${db_connection_input:-${HERMES_DEFAULT_DB_CONNECTION_STRING}}"
+                "${discord_users_input:-${HERMES_DEFAULT_DISCORD_ALLOWED_USERS}}"
         fi
     else
         log_warn "Running in non-interactive/forced mode without Hermes env vars. Applying placeholder secret..."
@@ -200,13 +215,30 @@ else
     log_info "${HERMES_SECRET_NAME} already exists in '${HERMES_NAMESPACE}' namespace."
 fi
 
+# 3.7 Set up Hermes auth secrets if needed
+log_info "Checking Hermes auth secrets..."
+if ! kubectl get secret "hermes-auth-secrets" -n "${HERMES_NAMESPACE}" &> /dev/null; then
+    if [ -f "${HOME}/.hermes/auth.json" ]; then
+        log_info "Creating hermes-auth-secrets from local ~/.hermes/auth.json..."
+        kubectl create secret generic hermes-auth-secrets \
+            --namespace "${HERMES_NAMESPACE}" \
+            --from-file=auth.json="${HOME}/.hermes/auth.json"
+    else
+        log_warn "Local ~/.hermes/auth.json not found. Skipping hermes-auth-secrets creation."
+    fi
+else
+    log_info "hermes-auth-secrets already exists in '${HERMES_NAMESPACE}' namespace."
+fi
+
 # 4. Deploy Application Manifests
 log_info "Applying application manifests..."
 APPS_DIR="${ROOT_DIR}/manifests/apps"
 if [ -d "${APPS_DIR}" ] && [ "$(ls -A "${APPS_DIR}")" ]; then
     find "${APPS_DIR}" -name "*.yaml" -o -name "*.yml" | while read -r yaml_file; do
         base_name="$(basename "${yaml_file}")"
-        if [ "${base_name}" != "hf-secret.yaml" ] && [ "${base_name}" != "hermes-gateway-secrets.yaml" ]; then
+        if [ "${base_name}" != "hf-secret.yaml" ] \
+            && [ "${base_name}" != "hermes-gateway-secrets.yaml" ] \
+            && [ "${base_name}" != "hermes-initial-subagents.yaml" ]; then
             log_info "Applying: $(basename "${yaml_file}")"
             kubectl apply -f "${yaml_file}"
         fi

@@ -26,7 +26,25 @@ spec:
         app: hermes-master
     spec:
       serviceAccountName: hermes-master-sa
+      # Hermes runs as UID 10000; hostPath shared workspace must be group-writable.
+      securityContext:
+        fsGroup: 10000
+        fsGroupChangePolicy: OnRootMismatch
       initContainers:
+        - name: fix-shared-workspace-perms
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              chown -R 10000:10000 /workspace/shared
+              chmod 2775 /workspace/shared
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: shared-workspace
+              mountPath: /workspace/shared
         - name: bootstrap-model-config
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: IfNotPresent
@@ -35,11 +53,11 @@ spec:
             - name: HERMES_HOME
               value: "/opt/data"
             - name: HERMES_INFERENCE_MODEL
-              value: "gpt-5.4-mini"
+              value: "gpt-5.5"
             - name: HERMES_INFERENCE_PROVIDER
-              value: "custom"
+              value: "openai-codex"
             - name: CUSTOM_BASE_URL
-              value: "https://api.openai.com/v1"
+              value: ""
           volumeMounts:
             - name: master-data
               mountPath: /opt/data
@@ -80,13 +98,13 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: HERMES_API_SERVER_KEY
-            # LLM inference via OpenAI-compatible custom endpoint
+            # LLM inference via OpenAI Codex
             - name: HERMES_INFERENCE_MODEL
-              value: "gpt-5.4-mini"
+              value: "gpt-5.5"
             - name: HERMES_INFERENCE_PROVIDER
-              value: "custom"
+              value: "openai-codex"
             - name: CUSTOM_BASE_URL
-              value: "https://api.openai.com/v1"
+              value: ""
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -103,12 +121,7 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: DISCORD_ALLOWED_USERS
-            # PostgreSQL backend
-            - name: DB_CONNECTION_STRING
-              valueFrom:
-                secretKeyRef:
-                  name: hermes-gateway-secrets
-                  key: DB_CONNECTION_STRING
+            # Session/memory: SQLite under HERMES_HOME (/opt/data/state.db), not PostgreSQL
             # In-cluster subagent endpoints (OpenAI-compatible Hermes API)
             - name: SUBAGENT_CODER_URL
               value: "http://hermes-subagent-coder.ai-agents.svc.cluster.local:8000/v1"
@@ -123,6 +136,9 @@ spec:
               mountPath: /opt/data
             - name: shared-workspace
               mountPath: /workspace/shared
+            - name: hermes-auth-volume
+              mountPath: /opt/data/auth.json
+              subPath: auth.json
       volumes:
         - name: bootstrap-scripts
           configMap:
@@ -131,6 +147,10 @@ spec:
         - name: shared-workspace
           persistentVolumeClaim:
             claimName: pvc-shared-workspace
+        - name: hermes-auth-volume
+          secret:
+            secretName: hermes-auth-secrets
+            optional: true
   volumeClaimTemplates:
     - metadata:
         name: master-data
