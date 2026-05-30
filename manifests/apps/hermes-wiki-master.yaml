@@ -59,7 +59,7 @@ spec:
               mountPath: /opt/data
         - name: bootstrap-model-config
           image: nousresearch/hermes-agent:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
           securityContext:
             runAsUser: 10000
@@ -82,12 +82,8 @@ spec:
       containers:
         - name: hermes-wiki-master
           image: nousresearch/hermes-agent:latest
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              /etc/cont-init.d/99-patch-openai.sh || true
-              exec /opt/hermes/docker/entrypoint.sh gateway run
+          imagePullPolicy: Always
+          args: ["gateway", "run"]
           ports:
             - containerPort: 9119
               name: dashboard

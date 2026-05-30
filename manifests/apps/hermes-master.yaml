@@ -61,7 +61,7 @@ spec:
               mountPath: /opt/data
         - name: bootstrap-model-config
           image: nousresearch/hermes-agent:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["/bin/bash", "/scripts/bootstrap-model.sh"]
           securityContext:
             runAsUser: 10000
@@ -84,14 +84,8 @@ spec:
       containers:
         - name: hermes-master
           image: nousresearch/hermes-agent:latest
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              # Patch the openai library responses file to prevent NoneType is not iterable error
-              /etc/cont-init.d/99-patch-openai.sh || true
-              # Execute original entrypoint script with default arguments
-              exec /opt/hermes/docker/entrypoint.sh gateway run
+          imagePullPolicy: Always
+          args: ["gateway", "run"]
           ports:
             - containerPort: 8642
               name: api
