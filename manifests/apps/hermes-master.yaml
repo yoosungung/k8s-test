@@ -53,12 +53,18 @@ spec:
             - /bin/sh
             - -c
             - |
+              if [ -f /var/secrets/hermes-auth/auth.json ] && [ ! -f /opt/data/auth.json ]; then
+                cp /var/secrets/hermes-auth/auth.json /opt/data/auth.json
+              fi
               chown -R 10000:10000 /opt/data
           securityContext:
             runAsUser: 0
           volumeMounts:
             - name: master-data
               mountPath: /opt/data
+            - name: hermes-auth-volume
+              mountPath: /var/secrets/hermes-auth
+              readOnly: true
         - name: bootstrap-model-config
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: Always
@@ -172,9 +178,6 @@ spec:
               mountPath: /opt/data
             - name: shared-workspace
               mountPath: /workspace/shared
-            - name: hermes-auth-volume
-              mountPath: /opt/data/auth.json
-              subPath: auth.json
             - name: bootstrap-scripts
               mountPath: /etc/cont-init.d/99-patch-openai.sh
               subPath: patch-openai.sh
