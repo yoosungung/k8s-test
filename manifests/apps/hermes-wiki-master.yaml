@@ -51,7 +51,7 @@ spec:
             - /bin/sh
             - -c
             - |
-              if [ -f /var/secrets/hermes-auth/auth.json ] && [ ! -f /opt/data/auth.json ]; then
+              if [ -f /var/secrets/hermes-auth/auth.json ] && [ ! -s /opt/data/auth.json ]; then
                 cp /var/secrets/hermes-auth/auth.json /opt/data/auth.json
               fi
               chown -R 10000:10000 /opt/data
@@ -89,7 +89,7 @@ spec:
         - name: hermes-wiki-master
           image: nousresearch/hermes-agent:latest
           imagePullPolicy: Always
-          args: ["gateway", "run"]
+          args: ["sleep", "infinity"]
           ports:
             - containerPort: 9119
               name: dashboard
