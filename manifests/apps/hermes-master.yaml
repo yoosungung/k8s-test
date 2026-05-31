@@ -108,6 +108,9 @@ spec:
               value: "0.0.0.0"
             - name: HERMES_DASHBOARD_PORT
               value: "9119"
+            # Required when binding dashboard to non-loopback without OAuth provider
+            - name: HERMES_DASHBOARD_INSECURE
+              value: "1"
             # Expose API server for internal agent-to-agent communication
             - name: API_SERVER_ENABLED
               value: "true"
@@ -148,6 +151,11 @@ spec:
                 secretKeyRef:
                   name: hermes-gateway-secrets
                   key: GITHUB_TOKEN
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HF_TOKEN
             - name: NAVER_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -210,13 +218,14 @@ metadata:
   labels:
     app.kubernetes.io/name: hermes-master
 spec:
+  type: NodePort
   ports:
     - port: 8642
       targetPort: 8642
       name: api
     - port: 9119
       targetPort: 9119
+      nodePort: 30119
       name: dashboard
   selector:
     app: hermes-master
-  type: ClusterIP

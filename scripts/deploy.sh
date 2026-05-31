@@ -35,6 +35,7 @@ apply_hermes_gateway_secret() {
     local linear_api_key="${6:-${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}}"
     local naver_client_id="${7:-${NAVER_CLIENT_ID:-REPLACE_WITH_NAVER_CLIENT_ID}}"
     local naver_client_secret="${8:-${NAVER_CLIENT_SECRET:-REPLACE_WITH_NAVER_CLIENT_SECRET}}"
+    local hf_token="${9:-${HF_TOKEN:-REPLACE_WITH_HF_TOKEN}}"
 
     kubectl create secret generic "${HERMES_SECRET_NAME}" \
         --namespace "${HERMES_NAMESPACE}" \
@@ -46,6 +47,7 @@ apply_hermes_gateway_secret() {
         --from-literal=LINEAR_API_KEY="${linear_api_key}" \
         --from-literal=NAVER_CLIENT_ID="${naver_client_id}" \
         --from-literal=NAVER_CLIENT_SECRET="${naver_client_secret}" \
+        --from-literal=HF_TOKEN="${hf_token}" \
         --dry-run=client -o yaml | kubectl apply -f -
 }
 
@@ -191,7 +193,8 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
             "${GITHUB_TOKEN:-REPLACE_WITH_GITHUB_TOKEN}" \
             "${LINEAR_API_KEY:-REPLACE_WITH_LINEAR_API_KEY}" \
             "${NAVER_CLIENT_ID:-REPLACE_WITH_NAVER_CLIENT_ID}" \
-            "${NAVER_CLIENT_SECRET:-REPLACE_WITH_NAVER_CLIENT_SECRET}"
+            "${NAVER_CLIENT_SECRET:-REPLACE_WITH_NAVER_CLIENT_SECRET}" \
+            "${HF_TOKEN:-REPLACE_WITH_HF_TOKEN}"
     elif [[ "${1:-}" != "--force" ]] && [ -t 0 ]; then
         echo -e "${YELLOW}[PROMPT] Hermes gateway secret not found.${NC}"
         read -rsp "OpenAI API key (OPENAI_API_KEY): " openai_key_input
@@ -229,7 +232,8 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
                 "${github_token_input:-REPLACE_WITH_GITHUB_TOKEN}" \
                 "${linear_api_key_input:-REPLACE_WITH_LINEAR_API_KEY}" \
                 "${naver_client_id_input:-REPLACE_WITH_NAVER_CLIENT_ID}" \
-                "${naver_client_secret_input:-REPLACE_WITH_NAVER_CLIENT_SECRET}"
+                "${naver_client_secret_input:-REPLACE_WITH_NAVER_CLIENT_SECRET}" \
+                "${HF_TOKEN:-REPLACE_WITH_HF_TOKEN}"
         fi
     else
         log_warn "Running in non-interactive/forced mode without Hermes env vars. Applying placeholder secret..."
