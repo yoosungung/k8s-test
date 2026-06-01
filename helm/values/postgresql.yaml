@@ -12,6 +12,11 @@ auth:
   password: "hermespassword"
 
 primary:
+  service:
+    type: NodePort
+    nodePorts:
+      postgresql: 30432
+
   # Resource configurations tailored for lightweight local test environments
   resources:
     limits:
