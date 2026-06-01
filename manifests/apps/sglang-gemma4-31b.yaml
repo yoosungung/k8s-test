@@ -32,17 +32,28 @@ spec:
         - awq_marlin
         - --dtype
         - bfloat16
+        # tp=2 / dp=1: shard 31B across 2×4090 so KV pool is not duplicated (dp=2 capped ~3.8k tokens/GPU).
         - --tp-size
-        - "1"
-        - --dp-size
         - "2"
+        - --dp-size
+        - "1"
         - --mem-fraction-static
         - "0.92"
         - --kv-cache-dtype
         - fp8_e5m2
         - --context-length
         - "16384"
-        - --allow-auto-truncate
+        # Required for OpenAI tool_calls (auto-detect alone leaves tool_call_parser=None at boot).
+        - --tool-call-parser
+        - gemma4
+        - --reasoning-parser
+        - gemma4
+        # Agent workloads: fail fast instead of silent Truncated (SGLang #21136).
+        # Free KV/activation headroom vs default cuda-graph capture (hyperparameter tuning doc).
+        - --disable-cuda-graph
+        # Long prompts: lower concurrency to reduce KV pressure (SGLang FAQ).
+        - --max-running-requests
+        - "32"
         - --host
         - 0.0.0.0
         - --port
@@ -50,15 +61,20 @@ spec:
         env:
         - name: PYTORCH_CUDA_ALLOC_CONF
           value: expandable_segments:True
-        # Set Hugging Face cache directory explicitly
         - name: HF_HOME
           value: /hf_cache
-        # Set Hugging Face authentication token
         - name: HF_TOKEN
           valueFrom:
             secretKeyRef:
               name: hf-token-secret
               key: token
+        # NCCL on K8s / consumer GPUs (SGLang #3666, vLLM/docker FAQ).
+        - name: NCCL_P2P_DISABLE
+          value: "1"
+        - name: NCCL_IB_DISABLE
+          value: "1"
+        - name: NCCL_SHM_DISABLE
+          value: "0"
         ports:
         - containerPort: 30000
           name: http
@@ -70,12 +86,18 @@ spec:
         volumeMounts:
         - name: model-cache
           mountPath: /hf_cache
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: model-cache
         hostPath:
-          # Caches downloaded model weights on host to avoid redownloads on restarts
           path: /Users/suyoo/hf_cache
           type: DirectoryOrCreate
+      # Default pod /dev/shm (~64Mi) breaks NCCL when tp>1.
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
 ---
 apiVersion: v1
 kind: Service
