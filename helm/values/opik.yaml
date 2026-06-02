@@ -1,0 +1,25 @@
+# Helm values for Comet Opik (LLM/agent observability) in the test environment.
+# Chart: https://comet-ml.github.io/opik/
+# Docs: https://www.comet.com/docs/opik/self-host/kubernetes
+
+component:
+  frontend:
+    service:
+      type: NodePort
+      ports:
+        - name: http
+          port: 5173
+          protocol: TCP
+          targetPort: 5173
+
+# Smaller PVCs than chart defaults (50Gi) for local/test clusters.
+clickhouse:
+  storage: 20Gi
+
+minio:
+  persistence:
+    size: 10Gi
+
+redis:
+  persistence:
+    size: 2Gi

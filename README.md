@@ -73,7 +73,29 @@ Some services are exposed outside the cluster via **NodePort**. Replace `<NODE_I
 | SGLang (gemma-4-31B) | `llm-serving` | **30300**         | 30000           | `[manifests/apps/sglang-gemma4-31b.yaml](manifests/apps/sglang-gemma4-31b.yaml)`                                                                             | `curl http://<NODE_IP>:30300/v1/models`            |
 | Hermes dashboard     | `ai-agents`   | **30119**         | 9119            | `[manifests/apps/hermes-master.yaml](manifests/apps/hermes-master.yaml)`, `[manifests/apps/hermes-wiki-master.yaml](manifests/apps/hermes-wiki-master.yaml)` | `http://<NODE_IP>:30119`                           |
 | Hermes API           | `ai-agents`   | *(auto-assigned)* | 8642            | `[manifests/apps/hermes-master.yaml](manifests/apps/hermes-master.yaml)`                                                                                     | See note below                                     |
+| Opik UI              | `opik`        | **30517**         | 5173            | `[helm/values/opik.yaml](helm/values/opik.yaml)`, `[scripts/deploy.sh](scripts/deploy.sh)`                                                                  | `http://<NODE_IP>:30517`                           |
 
+
+### Opik (agent tracing / experiments)
+
+[Opik](https://github.com/comet-ml/opik) is installed via Helm when you run `./scripts/deploy.sh`. The UI is exposed on NodePort **30517**. Self-hosted Opik has **no built-in authentication**—use only on trusted test networks.
+
+Trace from your machine or agents:
+
+```bash
+export OPIK_URL_OVERRIDE="http://<NODE_IP>:30517/api"
+export OPIK_WORKSPACE="default"
+pip install opik
+opik configure --use_local
+```
+
+From pods inside the cluster:
+
+```bash
+export OPIK_URL_OVERRIDE="http://opik-frontend.opik.svc.cluster.local:5173/api"
+```
+
+Override the chart image tag with `OPIK_VERSION` (default `latest`), e.g. `OPIK_VERSION=2.0.18 ./scripts/deploy.sh`.
 
 ### PostgreSQL credentials (test defaults)
 
@@ -100,6 +122,15 @@ kubectl get svc hermes-master -n ai-agents -o jsonpath='{.spec.ports[?(@.name=="
 
 ```bash
 kubectl get svc -A -o wide | grep NodePort
+```
+
+If Opik UI on `30517` refuses connection, confirm the assigned port (Helm may leave a random NodePort until `deploy.sh` patches it):
+
+```bash
+kubectl get svc opik-frontend -n opik -o jsonpath='{.spec.ports[0].nodePort}{"\n"}'
+# Fix to 30517:
+kubectl patch svc opik-frontend -n opik --type=json \
+  -p='[{"op":"replace","path":"/spec/ports/0/nodePort","value":30517}]'
 ```
 
 ### SGLang context / KV pool

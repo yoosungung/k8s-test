@@ -26,6 +26,11 @@ HERMES_SECRET_NAME="hermes-gateway-secrets"
 HERMES_NAMESPACE="ai-agents"
 HERMES_DEFAULT_DISCORD_ALLOWED_USERS="ericberryking"
 
+OPIK_NAMESPACE="opik"
+OPIK_RELEASE="opik"
+OPIK_FRONTEND_NODEPORT="30517"
+OPIK_VERSION="${OPIK_VERSION:-latest}"
+
 apply_hermes_gateway_secret() {
     local discord_token="$1"
     local openai_key="$2"
@@ -58,6 +63,75 @@ generate_hermes_api_server_key() {
         # Fallback when openssl is unavailable (API key must be >= 8 chars)
         date +%s | shasum -a 256 | cut -c1-32
     fi
+}
+
+ensure_opik_frontend_nodeport() {
+  local svc="opik-frontend"
+  local current_port=""
+
+  if ! kubectl get svc "${svc}" -n "${OPIK_NAMESPACE}" &> /dev/null; then
+    log_warn "Service ${svc} not found in ${OPIK_NAMESPACE}; skipping NodePort patch."
+    return 0
+  fi
+
+  current_port="$(kubectl get svc "${svc}" -n "${OPIK_NAMESPACE}" \
+    -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')"
+  if [[ "${current_port}" == "${OPIK_FRONTEND_NODEPORT}" ]]; then
+    log_info "Opik frontend NodePort already set to ${OPIK_FRONTEND_NODEPORT}."
+    return 0
+  fi
+
+  log_info "Setting Opik frontend NodePort to ${OPIK_FRONTEND_NODEPORT} (was: ${current_port:-unset})..."
+  if kubectl patch svc "${svc}" -n "${OPIK_NAMESPACE}" --type=json \
+    -p="[{\"op\":\"replace\",\"path\":\"/spec/ports/0/nodePort\",\"value\":${OPIK_FRONTEND_NODEPORT}}]"; then
+    log_info "Opik UI: http://<NODE_IP>:${OPIK_FRONTEND_NODEPORT}"
+    return 0
+  fi
+
+  log_warn "NodePort patch failed (port may be immutable). Recreating ${svc}..."
+  kubectl delete svc "${svc}" -n "${OPIK_NAMESPACE}" --ignore-not-found
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${svc}
+  namespace: ${OPIK_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: opik
+    app.kubernetes.io/instance: ${OPIK_RELEASE}
+    component: opik-frontend
+spec:
+  type: NodePort
+  selector:
+    component: opik-frontend
+  ports:
+    - name: http
+      port: 5173
+      targetPort: 5173
+      protocol: TCP
+      nodePort: ${OPIK_FRONTEND_NODEPORT}
+EOF
+  log_info "Opik UI: http://<NODE_IP>:${OPIK_FRONTEND_NODEPORT}"
+}
+
+deploy_opik() {
+  log_info "Ensuring Opik Helm repo is registered..."
+  helm repo add opik https://comet-ml.github.io/opik/ 2>/dev/null || true
+  helm repo update opik
+
+  log_info "Installing/upgrading Opik (${OPIK_VERSION}) in namespace '${OPIK_NAMESPACE}'..."
+  helm upgrade --install "${OPIK_RELEASE}" opik/opik \
+    --namespace "${OPIK_NAMESPACE}" \
+    --create-namespace \
+    -f "${ROOT_DIR}/helm/values/opik.yaml" \
+    --set "component.backend.image.tag=${OPIK_VERSION}" \
+    --set "component.python-backend.image.tag=${OPIK_VERSION}" \
+    --set "component.python-backend.env.PYTHON_CODE_EXECUTOR_IMAGE_TAG=${OPIK_VERSION}" \
+    --set "component.frontend.image.tag=${OPIK_VERSION}" \
+    --wait \
+    --timeout 20m
+
+  ensure_opik_frontend_nodeport
 }
 
 ensure_pgvector_extension() {
@@ -148,6 +222,8 @@ if [ "$HAS_HELM" = true ]; then
         -f "${ROOT_DIR}/helm/values/postgresql.yaml"
 
     ensure_pgvector_extension
+
+    deploy_opik
 fi
 
 # 3.5 Set up Hugging Face Token Secret if needed

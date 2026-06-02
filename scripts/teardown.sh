@@ -70,6 +70,13 @@ fi
 # 2. Teardown Helm Releases
 if [ "$HAS_HELM" = true ]; then
     log_info "Deleting Helm releases..."
+    log_info "Uninstalling Opik Helm release..."
+    if kubectl get chi opik-clickhouse -n opik &> /dev/null; then
+        log_info "Removing ClickHouse finalizer before Opik uninstall..."
+        kubectl patch -n opik chi opik-clickhouse --type json \
+            --patch='[{ "op": "remove", "path": "/metadata/finalizers" }]' || true
+    fi
+    helm uninstall opik --namespace opik || true
     log_info "Uninstalling PostgreSQL Helm release..."
     helm uninstall postgresql --namespace postgres || true
 fi
