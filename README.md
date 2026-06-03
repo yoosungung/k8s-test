@@ -243,7 +243,7 @@ GIT_HTTP_IMPORT_USE_TTY=1 GIT_HTTP_IMPORT_NODE=didim-gpu@192.168.150.200 ./scrip
 ```
 
 On the node, remove a bad arch before re-import: `sudo k3s ctr images rm docker.io/library/git-http-server:local`
-```
+
 
 ### PostgreSQL credentials (test defaults)
 
