@@ -1,0 +1,27 @@
+# Git Smart HTTP behind the shared ingress-nginx controller.
+# External: http://git.k8s-test:80/git/<repo>.git
+# In-cluster: http://git-http-server.git.svc.cluster.local/git/<repo>.git
+
+image:
+  repository: git-http-server
+  tag: local
+  # Local-only image (built on the node). Never pull from docker.io/library/...
+  pullPolicy: Never
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  className: nginx
+  host: git.k8s-test
+
+auth:
+  enabled: true
+  existingSecret: git-http-auth
+  username: git
+  password: gitpassword
+
+persistence:
+  enabled: true
+  size: 20Gi

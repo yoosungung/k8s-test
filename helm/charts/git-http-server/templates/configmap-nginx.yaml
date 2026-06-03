@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "git-http-server.fullname" . }}-nginx
+  namespace: {{ include "git-http-server.namespace" . }}
+  labels:
+    {{- include "git-http-server.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    server {
+        listen 80 default_server;
+        server_name _;
+
+        client_max_body_size 0;
+
+        location = /healthz {
+            access_log off;
+            default_type text/plain;
+            return 200 "ok\n";
+        }
+
+        location ~ {{ .Values.git.urlPrefix }}(/.*) {
+            include /etc/nginx/fastcgi_params;
+            fastcgi_pass unix:/var/run/fcgiwrap.sock;
+            fastcgi_param SCRIPT_FILENAME /usr/libexec/git-core/git-http-backend;
+            fastcgi_param GIT_HTTP_EXPORT_ALL "";
+            fastcgi_param GIT_PROJECT_ROOT {{ .Values.git.projectRoot }};
+            fastcgi_param PATH_INFO $1;
+            fastcgi_param REMOTE_USER $remote_user;
+            fastcgi_read_timeout 3600s;
+            fastcgi_send_timeout 3600s;
+            fastcgi_connect_timeout 60s;
+{{- if .Values.auth.enabled }}
+            auth_basic "Git Repository Access";
+            auth_basic_user_file /etc/nginx/git.htpasswd;
+{{- end }}
+        }
+    }

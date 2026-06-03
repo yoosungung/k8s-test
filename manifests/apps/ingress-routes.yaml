@@ -1,0 +1,113 @@
+# Shared ingress-nginx routes (host *.k8s-test; external port = app Service port via controller hostPort).
+# Map hosts in /etc/hosts, e.g.:
+#   <NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test git.k8s-test
+#
+# Git HTTP is defined in helm/charts/git-http-server (host git.k8s-test).
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opik-frontend
+  namespace: opik
+  labels:
+    app.kubernetes.io/name: opik
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: opik.k8s-test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: opik-frontend
+                port:
+                  number: 5173
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hermes-master-dashboard
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-master
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hermes.k8s-test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hermes-master
+                port:
+                  number: 9119
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hermes-master-api
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-master
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hermes-api.k8s-test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hermes-master
+                port:
+                  number: 8642
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sglang-gemma4-31b
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: sglang-gemma4-31b
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: sglang.k8s-test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sglang-gemma4-31b
+                port:
+                  number: 30000

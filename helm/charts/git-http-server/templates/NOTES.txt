@@ -1,0 +1,31 @@
+Git Smart HTTP is deployed in namespace {{ include "git-http-server.namespace" . }}.
+
+{{- if .Values.ingress.enabled }}
+
+Ingress class: {{ .Values.ingress.className | default "nginx" }}
+{{- if .Values.ingress.host }}
+Host: {{ .Values.ingress.host }}
+{{- end }}
+
+External (via shared ingress-nginx, HTTP NodePort 80):
+  http://<NODE_IP>:80{{ .Values.git.urlPrefix }}/<repo>.git
+{{- if .Values.ingress.host }}
+  http://{{ .Values.ingress.host }}:80{{ .Values.git.urlPrefix }}/<repo>.git
+{{- end }}
+
+{{- else if eq .Values.service.type "NodePort" }}
+
+External NodePort:
+  http://<NODE_IP>:{{ .Values.service.nodePort }}{{ .Values.git.urlPrefix }}/<repo>.git
+
+{{- end }}
+
+In-cluster:
+  http://{{ include "git-http-server.fullname" . }}.{{ include "git-http-server.namespace" . }}.svc.cluster.local{{ .Values.git.urlPrefix }}/<repo>.git
+
+Create a test bare repository:
+  kubectl exec -n {{ include "git-http-server.namespace" . }} deploy/{{ include "git-http-server.fullname" . }} -- \
+    sh -c 'mkdir -p {{ .Values.git.projectRoot }}/sample.git && git init --bare {{ .Values.git.projectRoot }}/sample.git && chown -R nginx:nginx {{ .Values.git.projectRoot }}/sample.git'
+
+Image build:
+  docker build -t {{ .Values.image.repository }}:{{ .Values.image.tag }} docker/git-http-server

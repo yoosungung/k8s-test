@@ -107,11 +107,10 @@ metadata:
   labels:
     app.kubernetes.io/name: sglang-gemma4-31b
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
   - name: http
     port: 30000
     targetPort: 30000
-    nodePort: 30300
   selector:
     app: sglang-gemma4-31b

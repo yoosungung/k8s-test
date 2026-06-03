@@ -13,9 +13,7 @@ auth:
 
 primary:
   service:
-    type: NodePort
-    nodePorts:
-      postgresql: 30432
+    type: ClusterIP
 
   # Resource configurations tailored for lightweight local test environments
   resources:

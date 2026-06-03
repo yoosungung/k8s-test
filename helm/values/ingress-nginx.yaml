@@ -1,0 +1,76 @@
+# Shared cluster Ingress controller (test / bare-metal).
+# External access uses each app's usual port (80, 443, 5173, 5432, …) via hostPort
+# and a small socat sidecar (works when the cluster NodePort range is 30000–32767).
+# PostgreSQL: TCP stream on controller :5432, exposed on host :5432.
+
+tcp:
+  5432: "postgres/postgresql:5432"
+
+controller:
+  # hostPort binds node ports; RollingUpdate cannot schedule a second pod on one node.
+  updateStrategy:
+    type: Recreate
+    rollingUpdate: null
+
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: true
+
+  # Bind HTTP/HTTPS on the node at the standard ports (not NodePort 30080/30443).
+  hostPort:
+    enabled: true
+    ports:
+      http: 80
+      https: 443
+
+  service:
+    type: ClusterIP
+
+  # Preserve client IP when using hostPort on single-node / LAN setups.
+  config:
+    use-forwarded-headers: "true"
+    compute-full-forwarded-for: "true"
+
+  metrics:
+    enabled: false
+
+  # Avoid pre-upgrade hook jobs on flaky test clusters; Ingress still works without validation.
+  admissionWebhooks:
+    enabled: false
+
+  # Proxy app service ports on the host to controller HTTP (:80) or TCP (:5432).
+  extraContainers:
+    - name: external-port-proxy
+      image: alpine/socat:1.8.0.0
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        capabilities:
+          add:
+            - NET_BIND_SERVICE
+      ports:
+        - name: opik
+          containerPort: 5173
+          hostPort: 5173
+          protocol: TCP
+        - name: hermes-dash
+          containerPort: 9119
+          hostPort: 9119
+          protocol: TCP
+        - name: hermes-api
+          containerPort: 8642
+          hostPort: 8642
+          protocol: TCP
+        - name: sglang
+          containerPort: 30000
+          hostPort: 30000
+          protocol: TCP
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          socat TCP-LISTEN:5173,fork,reuseaddr TCP:127.0.0.1:80 &
+          socat TCP-LISTEN:9119,fork,reuseaddr TCP:127.0.0.1:80 &
+          socat TCP-LISTEN:8642,fork,reuseaddr TCP:127.0.0.1:80 &
+          socat TCP-LISTEN:30000,fork,reuseaddr TCP:127.0.0.1:80 &
+          wait

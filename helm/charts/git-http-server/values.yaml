@@ -1,0 +1,75 @@
+# Default values for git-http-server.
+# Override via helm/values/git-http-server.yaml or --set.
+
+namespace: git
+
+image:
+  repository: git-http-server
+  tag: local
+  pullPolicy: Never
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  nodePort: ""
+
+ingress:
+  enabled: true
+  className: nginx
+  # Virtual host (e.g. git.k8s-test). Empty = match any Host via shared ingress NodePort.
+  host: ""
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+  tls: []
+
+git:
+  # URL path prefix (no trailing slash). Clone URL pattern:
+  #   http://git.k8s-test:80/git/<repo>.git
+  urlPrefix: /git
+  projectRoot: /srv/git
+
+auth:
+  enabled: true
+  # Secret is created by scripts/deploy.sh (or manually before helm install).
+  username: git
+  password: gitpassword
+  existingSecret: git-http-auth
+  secretName: git-http-auth
+  secretKey: htpasswd
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "2"
+    memory: 512Mi
+
+# Empty = container runs as root (default). Required for chown /srv/git and nginx master.
+podSecurityContext: {}
+securityContext: {}
+
+livenessProbe:
+  path: /healthz
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  path: /healthz
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

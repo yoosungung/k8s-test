@@ -218,14 +218,13 @@ metadata:
   labels:
     app.kubernetes.io/name: hermes-master
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: 8642
       targetPort: 8642
       name: api
     - port: 9119
       targetPort: 9119
-      nodePort: 30119
       name: dashboard
   selector:
     app: hermes-master

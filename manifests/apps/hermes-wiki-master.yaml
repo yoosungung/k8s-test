@@ -1,5 +1,6 @@
 # Hermes Wiki Master Agent - standalone agent with dashboard-only external access
-# Runs gateway without Discord/Linear; dashboard exposed via fixed NodePort
+# Optional: gateway without Discord/Linear. Not in ingress-routes.yaml by default.
+# To expose externally, add an Ingress rule (or use in-cluster ClusterIP only).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -168,11 +169,10 @@ metadata:
   labels:
     app.kubernetes.io/name: hermes-wiki-master
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: 9119
       targetPort: 9119
-      nodePort: 30119
       name: dashboard
   selector:
     app: hermes-wiki-master

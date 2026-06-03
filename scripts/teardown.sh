@@ -79,6 +79,10 @@ if [ "$HAS_HELM" = true ]; then
     helm uninstall opik --namespace opik || true
     log_info "Uninstalling PostgreSQL Helm release..."
     helm uninstall postgresql --namespace postgres || true
+    log_info "Uninstalling git-http-server Helm release..."
+    helm uninstall git-http-server --namespace git || true
+    log_info "Uninstalling ingress-nginx Helm release..."
+    helm uninstall ingress-nginx --namespace ingress-nginx || true
 fi
 
 # 2.5 Delete manually created secrets
@@ -86,6 +90,7 @@ log_info "Deleting standalone secrets..."
 kubectl delete secret hf-token-secret -n llm-serving --ignore-not-found || true
 kubectl delete secret hermes-gateway-secrets -n ai-agents --ignore-not-found || true
 kubectl delete secret hermes-auth-secrets -n ai-agents --ignore-not-found || true
+kubectl delete secret git-http-auth -n git --ignore-not-found || true
 
 # 2.7 Delete cluster-scoped RBAC resources (not tied to any namespace)
 log_info "Deleting cluster-scoped RBAC resources..."

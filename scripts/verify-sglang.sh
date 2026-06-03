@@ -62,7 +62,11 @@ fi
 echo ""
 echo "=== Tool calling (OpenAI tool_calls, not raw <|tool_call> text) ==="
 node_ip="${NODE_IP:-192.168.150.200}"
-tool_resp="$(curl -sf --max-time 120 "http://${node_ip}:30300/v1/chat/completions" \
+ingress_port="${SGLANG_HTTP_PORT:-30000}"
+sglang_host="${SGLANG_INGRESS_HOST:-sglang.k8s-test}"
+sglang_base="http://${node_ip}:${ingress_port}"
+tool_resp="$(curl -sf --max-time 120 "${sglang_base}/v1/chat/completions" \
+  -H "Host: ${sglang_host}" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "QuantTrio/gemma-4-31B-it-AWQ",
@@ -106,8 +110,11 @@ fi
 echo ""
 echo "=== /v1/models (optional) ==="
 node_ip="${NODE_IP:-192.168.150.200}"
-if curl -sf --max-time 5 "http://${node_ip}:30300/v1/models" >/dev/null; then
-  ok "HTTP reachable at http://${node_ip}:30300/v1/models"
+ingress_port="${SGLANG_HTTP_PORT:-30000}"
+sglang_host="${SGLANG_INGRESS_HOST:-sglang.k8s-test}"
+models_url="http://${node_ip}:${ingress_port}/v1/models"
+if curl -sf --max-time 5 -H "Host: ${sglang_host}" "${models_url}" >/dev/null; then
+  ok "HTTP reachable at ${models_url} (Host: ${sglang_host})"
 else
-  warn "Could not reach http://${node_ip}:30300/v1/models (set NODE_IP if needed)"
+  warn "Could not reach ${models_url} with Host: ${sglang_host} (set NODE_IP /etc/hosts)"
 fi

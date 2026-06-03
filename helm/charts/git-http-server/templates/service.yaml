@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "git-http-server.fullname" . }}
+  namespace: {{ include "git-http-server.namespace" . }}
+  labels:
+    {{- include "git-http-server.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "git-http-server.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort (ne .Values.service.nodePort "") }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}

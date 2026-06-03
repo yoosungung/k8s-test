@@ -32,6 +32,21 @@ Before running scripts or applying manifests, ensure you have:
 2. `helm` (v3+) installed.
 3. Network access to the Kubernetes cluster.
 
+**k3s:** The bundled **Traefik** Service LB (`svclb-traefik-*`) reserves **hostPort 80 and 443**. That blocks ingress-nginx from binding the same ports even when `ss -tlnp | grep ':80\|:443'` on the node shows nothing. Disable Traefik once on the server, then restart k3s:
+
+```yaml
+# /etc/rancher/k3s/config.yaml
+disable:
+  - traefik
+```
+
+```bash
+sudo systemctl restart k3s   # or k3s-agent on agents
+kubectl get pods -n kube-system | grep traefik   # should be gone
+```
+
+Then re-run `./scripts/deploy.sh` or upgrade ingress-nginx.
+
 ### Deploy the Test Environment
 
 To deploy all configurations, infrastructure elements, and applications in the correct order:
@@ -62,28 +77,50 @@ To remove all components and clean up the namespaces created for testing:
 
 ---
 
-## NodePort Services (External Access)
+## External access (shared Ingress)
 
-Some services are exposed outside the cluster via **NodePort**. Replace `<NODE_IP>` with any cluster node address (for example, the test node `192.168.150.200`).
+Apps use **ClusterIP** Services and reach the LAN via the shared [ingress-nginx](https://kubernetes.github.io/ingress-nginx/) controller. Host-based routing uses **`*.k8s-test`**; the URL **port matches each app’s Service port** (e.g. Opik **5173**, SGLang **30000**, Git **80**). The controller binds those ports on the node with **hostPort** (and a small socat sidecar for extra HTTP/TCP aliases), so you do not use a shared **30080** hop.
 
+Replace `<NODE_IP>` with any cluster node (e.g. `192.168.150.200`). HTTP apps use **`http://<name>.k8s-test:<app-port>/`** (no shared `30080` hop).
 
-| Service              | Namespace     | NodePort          | In-cluster port | Config source                                                                                                                                                | Access example                                     |
-| -------------------- | ------------- | ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| PostgreSQL           | `postgres`    | **30432**         | 5432            | `[helm/values/postgresql.yaml](helm/values/postgresql.yaml)`                                                                                                 | `psql -h <NODE_IP> -p 30432 -U hermes -d hermesdb` |
-| SGLang (gemma-4-31B) | `llm-serving` | **30300**         | 30000           | `[manifests/apps/sglang-gemma4-31b.yaml](manifests/apps/sglang-gemma4-31b.yaml)`                                                                             | `curl http://<NODE_IP>:30300/v1/models`            |
-| Hermes dashboard     | `ai-agents`   | **30119**         | 9119            | `[manifests/apps/hermes-master.yaml](manifests/apps/hermes-master.yaml)`, `[manifests/apps/hermes-wiki-master.yaml](manifests/apps/hermes-wiki-master.yaml)` | `http://<NODE_IP>:30119`                           |
-| Hermes API           | `ai-agents`   | *(auto-assigned)* | 8642            | `[manifests/apps/hermes-master.yaml](manifests/apps/hermes-master.yaml)`                                                                                     | See note below                                     |
-| Opik UI              | `opik`        | **30517**         | 5173            | `[helm/values/opik.yaml](helm/values/opik.yaml)`, `[scripts/deploy.sh](scripts/deploy.sh)`                                                                  | `http://<NODE_IP>:30517`                           |
+Add to `/etc/hosts`:
 
+```text
+<NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test git.k8s-test
+```
+
+| Service | Host | External URL | In-cluster |
+| -------- | ------ | ------------ | ---------- |
+| Ingress (HTTP/HTTPS) | — | `http://<NODE_IP>:80` / `https://<NODE_IP>:443` | — |
+| PostgreSQL | — | `psql -h <NODE_IP> -p 5432 …` | `postgresql.postgres.svc.cluster.local:5432` |
+| Opik UI | `opik.k8s-test` | `http://opik.k8s-test:5173/` | `opik-frontend.opik.svc.cluster.local:5173` |
+| Hermes dashboard | `hermes.k8s-test` | `http://hermes.k8s-test:9119/` | `hermes-master.ai-agents.svc.cluster.local:9119` |
+| Hermes API | `hermes-api.k8s-test` | `http://hermes-api.k8s-test:8642/` | `hermes-master.ai-agents.svc.cluster.local:8642` |
+| SGLang OpenAI | `sglang.k8s-test` | `http://sglang.k8s-test:30000/v1/` | `sglang-gemma4-31b.llm-serving.svc.cluster.local:30000` |
+| Git HTTP | `git.k8s-test` | `http://git.k8s-test:80/git/<repo>.git` | `git-http-server.git.svc.cluster.local/git/…` |
+
+Ingress definitions: `[manifests/apps/ingress-routes.yaml](manifests/apps/ingress-routes.yaml)` (Git: `[helm/charts/git-http-server](helm/charts/git-http-server)`). Controller values: `[helm/values/ingress-nginx.yaml](helm/values/ingress-nginx.yaml)`.
+
+```bash
+kubectl get ingress -A
+kubectl get pods -n ingress-nginx -o wide
+```
+
+The controller uses **hostPort** (not per-app NodePorts). If an upgrade stays `Pending` with `didn't have free ports`, delete stuck controller pods and re-run `./scripts/deploy.sh`, or:
+
+```bash
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  -n ingress-nginx -f helm/values/ingress-nginx.yaml --wait --timeout 15m
+```
 
 ### Opik (agent tracing / experiments)
 
-[Opik](https://github.com/comet-ml/opik) is installed via Helm when you run `./scripts/deploy.sh`. The UI is exposed on NodePort **30517**. Self-hosted Opik has **no built-in authentication**—use only on trusted test networks.
+[Opik](https://github.com/comet-ml/opik) is installed via Helm when you run `./scripts/deploy.sh`. Self-hosted Opik has **no built-in authentication**—use only on trusted test networks.
 
-Trace from your machine or agents:
+Trace from your machine:
 
 ```bash
-export OPIK_URL_OVERRIDE="http://<NODE_IP>:30517/api"
+export OPIK_URL_OVERRIDE="http://opik.k8s-test:5173/api"
 export OPIK_WORKSPACE="default"
 pip install opik
 opik configure --use_local
@@ -96,6 +133,117 @@ export OPIK_URL_OVERRIDE="http://opik-frontend.opik.svc.cluster.local:5173/api"
 ```
 
 Override the chart image tag with `OPIK_VERSION` (default `latest`), e.g. `OPIK_VERSION=2.0.18 ./scripts/deploy.sh`.
+
+### Git HTTP server
+
+Smart HTTP Git is served by the `git-http-server` Helm chart in namespace `git`. Repositories are **bare** repos on the PVC mounted at **`/srv/git`** inside the pod.
+
+| Item | Value |
+| -------- | ------ |
+| Host | `git.k8s-test` (override: `GIT_HTTP_INGRESS_HOST`) |
+| URL path | `/git/<repo>.git` |
+| On-disk path | `/srv/git/<repo>.git` |
+| Auth (test default) | user `git`, password `gitpassword` |
+
+Add to `/etc/hosts` (same line as other `*.k8s-test` apps):
+
+```text
+<NODE_IP>  git.k8s-test
+```
+
+#### Create a repository
+
+Replace `myrepo` with your repository name (use the `.git` suffix on disk).
+
+**Inside the cluster** (recommended):
+
+```bash
+kubectl exec -n git deploy/git-http-server -- \
+  sh -c 'mkdir -p /srv/git/myrepo.git && git init --bare /srv/git/myrepo.git && chown -R nginx:nginx /srv/git/myrepo.git'
+```
+
+**On the GPU node** (if you have shell access and the PVC is mounted on the node — usually not needed):
+
+```bash
+# Only if you know the volume path on the host; prefer kubectl exec above.
+sudo mkdir -p /var/lib/rancher/k3s/storage/.../srv/git/myrepo.git
+sudo git init --bare /path/to/myrepo.git
+```
+
+#### Clone, push, and pull
+
+Clone URL pattern:
+
+```text
+http://git.k8s-test:80/git/<repo>.git
+```
+
+Examples:
+
+```bash
+# Clone (test credentials in URL)
+git clone http://git:gitpassword@git.k8s-test:80/git/myrepo.git
+
+# Or store credentials once
+git clone http://git.k8s-test:80/git/myrepo.git
+# Username: git   Password: gitpassword
+
+cd myrepo
+git remote -v
+# push a branch (after you have commits)
+git push origin main
+```
+
+From another pod in the cluster:
+
+```bash
+git clone http://git:gitpassword@git-http-server.git.svc.cluster.local/git/myrepo.git
+```
+
+#### Sample repository (`sample.git`)
+
+```bash
+kubectl exec -n git deploy/git-http-server -- \
+  sh -c 'mkdir -p /srv/git/sample.git && git init --bare /srv/git/sample.git && chown -R nginx:nginx /srv/git/sample.git'
+
+git clone http://git:gitpassword@git.k8s-test:80/git/sample.git
+```
+
+Override credentials when deploying: `GIT_HTTP_USER`, `GIT_HTTP_PASSWORD` in `scripts/deploy.sh`.
+
+#### Build the image (first-time / after Dockerfile changes)
+
+Chart uses `git-http-server:local` with `pullPolicy: Never` — build on the node or Mac, then import into k3s:
+
+```bash
+# Mac: start Docker first (builds linux/amd64 for the GPU node by default)
+colima start
+./scripts/build-git-http-server-image.sh
+
+# Or build on the k3s node (no local Docker)
+GIT_HTTP_BUILD_NODE=didim-gpu@192.168.150.200 ./scripts/build-git-http-server-image.sh
+kubectl rollout restart deploy/git-http-server -n git
+```
+
+After `GIT_HTTP_IMPORT_NODE=...`, the tarball is copied to the node; **run import on the node** (Mac `ssh sudo` often fails without a TTY):
+
+```bash
+sudo k3s ctr images import /tmp/git-http-server-local.tar
+sudo k3s ctr images ls | grep git-http-server
+kubectl rollout restart deploy/git-http-server -n git
+```
+
+Or from Mac with password prompt: `GIT_HTTP_IMPORT_USE_TTY=1 GIT_HTTP_IMPORT_NODE=didim-gpu@192.168.150.200 ./scripts/build-git-http-server-image.sh`
+
+If import shows `linux/arm64` or `no match for platform`, the image was built for the wrong CPU. Rebuild for amd64:
+
+```bash
+GIT_HTTP_IMAGE_PLATFORM=linux/amd64 ./scripts/build-git-http-server-image.sh
+GIT_HTTP_IMPORT_USE_TTY=1 GIT_HTTP_IMPORT_NODE=didim-gpu@192.168.150.200 ./scripts/build-git-http-server-image.sh
+```
+
+On the node, remove a bad arch before re-import: `sudo k3s ctr images rm docker.io/library/git-http-server:local`
+```
 
 ### PostgreSQL credentials (test defaults)
 
@@ -110,27 +258,8 @@ Defined in `[helm/values/postgresql.yaml](helm/values/postgresql.yaml)`:
 
 The `hermesdb` database is initialized with the **pgvector** extension.
 
-### Hermes API NodePort
-
-Only the Hermes **dashboard** port is pinned to `30119`. The API port (`8642`) receives a **Kubernetes-assigned** NodePort (it changes if the Service is recreated). Look it up after deploy:
-
 ```bash
-kubectl get svc hermes-master -n ai-agents -o jsonpath='{.spec.ports[?(@.name=="api")].nodePort}{"\n"}'
-```
-
-### Verify NodePorts
-
-```bash
-kubectl get svc -A -o wide | grep NodePort
-```
-
-If Opik UI on `30517` refuses connection, confirm the assigned port (Helm may leave a random NodePort until `deploy.sh` patches it):
-
-```bash
-kubectl get svc opik-frontend -n opik -o jsonpath='{.spec.ports[0].nodePort}{"\n"}'
-# Fix to 30517:
-kubectl patch svc opik-frontend -n opik --type=json \
-  -p='[{"op":"replace","path":"/spec/ports/0/nodePort","value":30517}]'
+psql -h <NODE_IP> -p 5432 -U hermes -d hermesdb
 ```
 
 ### SGLang context / KV pool

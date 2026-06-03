@@ -28,8 +28,26 @@ HERMES_DEFAULT_DISCORD_ALLOWED_USERS="ericberryking"
 
 OPIK_NAMESPACE="opik"
 OPIK_RELEASE="opik"
-OPIK_FRONTEND_NODEPORT="30517"
 OPIK_VERSION="${OPIK_VERSION:-latest}"
+
+INGRESS_NAMESPACE="ingress-nginx"
+INGRESS_RELEASE="ingress-nginx"
+INGRESS_HTTP_NODEPORT="80"
+INGRESS_HTTPS_NODEPORT="443"
+POSTGRES_TCP_NODEPORT="5432"
+OPIK_HTTP_PORT="5173"
+SGLANG_HTTP_PORT="30000"
+HERMES_DASHBOARD_PORT="9119"
+HERMES_API_PORT="8642"
+
+GIT_HTTP_NAMESPACE="git"
+GIT_HTTP_RELEASE="git-http-server"
+GIT_HTTP_AUTH_SECRET="git-http-auth"
+K8S_TEST_DOMAIN_SUFFIX="${K8S_TEST_DOMAIN_SUFFIX:-k8s-test}"
+GIT_HTTP_INGRESS_HOST="${GIT_HTTP_INGRESS_HOST:-git.${K8S_TEST_DOMAIN_SUFFIX}}"
+BUILD_GIT_HTTP_IMAGE="${BUILD_GIT_HTTP_IMAGE:-true}"
+GIT_HTTP_IMAGE_REPO="${GIT_HTTP_IMAGE_REPO:-git-http-server}"
+GIT_HTTP_IMAGE_TAG="${GIT_HTTP_IMAGE_TAG:-local}"
 
 apply_hermes_gateway_secret() {
     local discord_token="$1"
@@ -65,53 +83,15 @@ generate_hermes_api_server_key() {
     fi
 }
 
-ensure_opik_frontend_nodeport() {
-  local svc="opik-frontend"
-  local current_port=""
-
-  if ! kubectl get svc "${svc}" -n "${OPIK_NAMESPACE}" &> /dev/null; then
-    log_warn "Service ${svc} not found in ${OPIK_NAMESPACE}; skipping NodePort patch."
-    return 0
-  fi
-
-  current_port="$(kubectl get svc "${svc}" -n "${OPIK_NAMESPACE}" \
-    -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')"
-  if [[ "${current_port}" == "${OPIK_FRONTEND_NODEPORT}" ]]; then
-    log_info "Opik frontend NodePort already set to ${OPIK_FRONTEND_NODEPORT}."
-    return 0
-  fi
-
-  log_info "Setting Opik frontend NodePort to ${OPIK_FRONTEND_NODEPORT} (was: ${current_port:-unset})..."
-  if kubectl patch svc "${svc}" -n "${OPIK_NAMESPACE}" --type=json \
-    -p="[{\"op\":\"replace\",\"path\":\"/spec/ports/0/nodePort\",\"value\":${OPIK_FRONTEND_NODEPORT}}]"; then
-    log_info "Opik UI: http://<NODE_IP>:${OPIK_FRONTEND_NODEPORT}"
-    return 0
-  fi
-
-  log_warn "NodePort patch failed (port may be immutable). Recreating ${svc}..."
-  kubectl delete svc "${svc}" -n "${OPIK_NAMESPACE}" --ignore-not-found
-  kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${svc}
-  namespace: ${OPIK_NAMESPACE}
-  labels:
-    app.kubernetes.io/name: opik
-    app.kubernetes.io/instance: ${OPIK_RELEASE}
-    component: opik-frontend
-spec:
-  type: NodePort
-  selector:
-    component: opik-frontend
-  ports:
-    - name: http
-      port: 5173
-      targetPort: 5173
-      protocol: TCP
-      nodePort: ${OPIK_FRONTEND_NODEPORT}
-EOF
-  log_info "Opik UI: http://<NODE_IP>:${OPIK_FRONTEND_NODEPORT}"
+log_ingress_routes() {
+    log_info "External access (*.${K8S_TEST_DOMAIN_SUFFIX} — each app uses its service port); add to /etc/hosts:"
+    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
+    log_info "  Opik UI:           http://opik.${K8S_TEST_DOMAIN_SUFFIX}:${OPIK_HTTP_PORT}/"
+    log_info "  Hermes dashboard:  http://hermes.${K8S_TEST_DOMAIN_SUFFIX}:${HERMES_DASHBOARD_PORT}/"
+    log_info "  Hermes API:        http://hermes-api.${K8S_TEST_DOMAIN_SUFFIX}:${HERMES_API_PORT}/"
+    log_info "  SGLang OpenAI:     http://sglang.${K8S_TEST_DOMAIN_SUFFIX}:${SGLANG_HTTP_PORT}/v1/"
+    log_info "  Git HTTP:          http://git.${K8S_TEST_DOMAIN_SUFFIX}:${INGRESS_HTTP_NODEPORT}/git/<repo>.git"
+    log_info "  PostgreSQL (TCP):  psql -h <NODE_IP> -p ${POSTGRES_TCP_NODEPORT} -U hermes -d hermesdb"
 }
 
 deploy_opik() {
@@ -130,8 +110,6 @@ deploy_opik() {
     --set "component.frontend.image.tag=${OPIK_VERSION}" \
     --wait \
     --timeout 20m
-
-  ensure_opik_frontend_nodeport
 }
 
 ensure_pgvector_extension() {
@@ -151,6 +129,99 @@ ensure_pgvector_extension() {
     else
         log_warn "Failed to enable pgvector automatically. Check PostgreSQL image compatibility and run CREATE EXTENSION manually."
     fi
+}
+
+deploy_ingress_nginx() {
+    log_info "Ensuring ingress-nginx Helm repo is registered..."
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null || true
+    helm repo update ingress-nginx
+
+    # hostPort: clear Pending pods from a failed RollingUpdate (ports held by the old pod).
+    if kubectl get deployment ingress-nginx-controller -n "${INGRESS_NAMESPACE}" &>/dev/null; then
+        kubectl delete pods -n "${INGRESS_NAMESPACE}" \
+            -l app.kubernetes.io/component=controller \
+            --field-selector=status.phase=Pending \
+            --ignore-not-found=true || true
+    fi
+
+    log_info "Installing/upgrading ${INGRESS_RELEASE} (hostPort + app ports) in namespace '${INGRESS_NAMESPACE}'..."
+    helm upgrade --install "${INGRESS_RELEASE}" ingress-nginx/ingress-nginx \
+        --namespace "${INGRESS_NAMESPACE}" \
+        --create-namespace \
+        -f "${ROOT_DIR}/helm/values/ingress-nginx.yaml" \
+        --wait \
+        --timeout 15m
+
+    log_info "Waiting for ingress-nginx controller pods..."
+    kubectl wait --namespace "${INGRESS_NAMESPACE}" \
+        --for=condition=ready pod \
+        --selector=app.kubernetes.io/component=controller \
+        --timeout=300s
+
+    log_info "External ports: Git/HTTP ${INGRESS_HTTP_NODEPORT}, HTTPS ${INGRESS_HTTPS_NODEPORT}, Opik ${OPIK_HTTP_PORT}, Hermes ${HERMES_DASHBOARD_PORT}, API ${HERMES_API_PORT}, SGLang ${SGLANG_HTTP_PORT}, Postgres ${POSTGRES_TCP_NODEPORT}"
+    log_info "Shared Ingress HTTP:  http://<NODE_IP>:${INGRESS_HTTP_NODEPORT}/ (Git: git.${K8S_TEST_DOMAIN_SUFFIX})"
+    log_info "Shared Ingress HTTPS: https://<NODE_IP>:${INGRESS_HTTPS_NODEPORT}/"
+}
+
+ensure_git_http_auth_secret() {
+    local user="${GIT_HTTP_USER:-git}"
+    local pass="${GIT_HTTP_PASSWORD:-gitpassword}"
+
+    if ! command -v openssl &> /dev/null; then
+        log_error "openssl is required to create ${GIT_HTTP_AUTH_SECRET}."
+        exit 1
+    fi
+
+    local hash
+    hash="$(openssl passwd -apr1 "${pass}")"
+
+    log_info "Applying Git HTTP basic-auth secret (${GIT_HTTP_AUTH_SECRET}) in ${GIT_HTTP_NAMESPACE}..."
+    kubectl create secret generic "${GIT_HTTP_AUTH_SECRET}" \
+        --namespace "${GIT_HTTP_NAMESPACE}" \
+        --from-literal=htpasswd="${user}:${hash}" \
+        --dry-run=client -o yaml | kubectl apply -f -
+}
+
+deploy_git_http_server() {
+    local chart_dir="${ROOT_DIR}/helm/charts/git-http-server"
+    local values_file="${ROOT_DIR}/helm/values/git-http-server.yaml"
+
+    if ! kubectl get namespace "${GIT_HTTP_NAMESPACE}" &> /dev/null; then
+        log_warn "Namespace ${GIT_HTTP_NAMESPACE} not found; apply manifests/infra/git-namespace.yaml first."
+    fi
+
+    if ! kubectl get ingressclass nginx &> /dev/null; then
+        log_error "IngressClass 'nginx' not found. Run deploy_ingress_nginx first."
+        exit 1
+    fi
+
+    ensure_git_http_auth_secret
+
+    if [[ "${BUILD_GIT_HTTP_IMAGE}" == true ]]; then
+        if command -v docker &> /dev/null; then
+            log_info "Building ${GIT_HTTP_IMAGE_REPO}:${GIT_HTTP_IMAGE_TAG} image..."
+            docker build --platform "${GIT_HTTP_IMAGE_PLATFORM:-linux/amd64}" \
+                -t "${GIT_HTTP_IMAGE_REPO}:${GIT_HTTP_IMAGE_TAG}" \
+                "${ROOT_DIR}/docker/git-http-server"
+        else
+            log_warn "docker not found; ensure image ${GIT_HTTP_IMAGE_REPO}:${GIT_HTTP_IMAGE_TAG} exists on cluster nodes."
+        fi
+    fi
+
+    log_info "Installing/upgrading ${GIT_HTTP_RELEASE} in namespace '${GIT_HTTP_NAMESPACE}' (requires ingress-nginx)..."
+    helm upgrade --install "${GIT_HTTP_RELEASE}" "${chart_dir}" \
+        --namespace "${GIT_HTTP_NAMESPACE}" \
+        -f "${values_file}" \
+        --set "image.repository=${GIT_HTTP_IMAGE_REPO}" \
+        --set "image.tag=${GIT_HTTP_IMAGE_TAG}" \
+        --set "ingress.enabled=true" \
+        --set "ingress.className=nginx" \
+        --set-string "ingress.host=${GIT_HTTP_INGRESS_HOST}" \
+        --wait \
+        --timeout 10m
+
+    log_info "Git HTTP (Ingress): http://${GIT_HTTP_INGRESS_HOST}:${INGRESS_HTTP_NODEPORT}/git/<repo>.git"
+    log_info "Git HTTP in-cluster: http://${GIT_HTTP_RELEASE}.${GIT_HTTP_NAMESPACE}.svc.cluster.local/git/<repo>.git"
 }
 
 # Resolve script directory to allow running this script from anywhere
@@ -211,6 +282,8 @@ fi
 # 3. Install/Upgrade Helm Charts
 if [ "$HAS_HELM" = true ]; then
     log_info "Deploying Helm releases..."
+    deploy_ingress_nginx
+
     log_info "Ensuring Bitnami Helm repo is registered..."
     helm repo add bitnami https://charts.bitnami.com/bitnami
     helm repo update
@@ -222,6 +295,8 @@ if [ "$HAS_HELM" = true ]; then
         -f "${ROOT_DIR}/helm/values/postgresql.yaml"
 
     ensure_pgvector_extension
+
+    deploy_git_http_server
 
     deploy_opik
 fi
@@ -349,6 +424,10 @@ if [ -d "${APPS_DIR}" ] && [ "$(ls -A "${APPS_DIR}")" ]; then
     done
 else
     log_warn "No application manifests found under ${APPS_DIR}."
+fi
+
+if [ "$HAS_HELM" = true ]; then
+    log_ingress_routes
 fi
 
 log_info "Deployment sequence completed successfully!"
