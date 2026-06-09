@@ -1,0 +1,219 @@
+# Grants Hermes enough Kubernetes operator permissions for day-to-day operations
+# from the in-cluster ServiceAccount used by hermes-master.
+#
+# Scope note:
+# - This is intentionally broader than the built-in `view` ClusterRole.
+# - It allows operational changes such as PVC/PV patch/update/delete,
+#   workload restart/scale/rollback-style changes, Service/Ingress fixes,
+#   pod eviction/deletion, and node cordon/uncordon-style patching.
+# - It does NOT grant RBAC write permissions, so Hermes cannot grant itself
+#   or others additional privileges.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hermes-k8s-operator
+  labels:
+    app.kubernetes.io/name: hermes-k8s-operator
+    app.kubernetes.io/part-of: k8s-test
+rules:
+  # Cluster/resource discovery.
+  - apiGroups: [""]
+    resources:
+      - componentstatuses
+      - namespaces
+      - nodes
+      - persistentvolumes
+      - persistentvolumeclaims
+      - pods
+      - pods/log
+      - replicationcontrollers
+      - resourcequotas
+      - limitranges
+      - services
+      - endpoints
+      - events
+      - configmaps
+      - secrets
+      - serviceaccounts
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["events.k8s.io"]
+    resources:
+      - events
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/status
+      - replicasets
+      - replicasets/status
+      - statefulsets
+      - statefulsets/status
+      - daemonsets
+      - daemonsets/status
+      - controllerrevisions
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - jobs/status
+      - cronjobs
+      - cronjobs/status
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - ingresses/status
+      - ingressclasses
+      - networkpolicies
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - csidrivers
+      - csinodes
+      - csistoragecapacities
+      - volumeattachments
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources:
+      - volumesnapshotclasses
+      - volumesnapshots
+      - volumesnapshotcontents
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: ["get", "list", "watch"]
+
+  # Storage operations: PV/PVC troubleshooting, resizing, reclaim policy/finalizer
+  # fixes, manual bind/rebind workflows, and cleanup.
+  - apiGroups: [""]
+    resources:
+      - persistentvolumes
+      - persistentvolumeclaims
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - volumeattachments
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources:
+      - volumesnapshots
+      - volumesnapshotcontents
+    verbs: ["create", "patch", "update", "delete"]
+
+  # Application operations: restart/scale/patch workloads, update services and
+  # ingress routes, run one-off jobs, and repair config needed by workloads.
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+      - services
+      - endpoints
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments/scale
+      - replicasets/scale
+      - statefulsets/scale
+    verbs: ["get", "patch", "update"]
+
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["create", "patch", "update", "delete"]
+
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["create", "patch", "update", "delete"]
+
+  # Runtime operations: log access, exec/port-forward for debugging, pod
+  # deletion/eviction for stuck workloads, and node patching for cordon/uncordon
+  # or label/taint fixes.
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: ["get", "list", "watch", "delete", "patch", "update"]
+
+  - apiGroups: [""]
+    resources:
+      - pods/exec
+      - pods/portforward
+    verbs: ["create"]
+
+  - apiGroups: ["policy"]
+    resources:
+      - pods/eviction
+    verbs: ["create"]
+
+  - apiGroups: [""]
+    resources:
+      - nodes
+    verbs: ["patch", "update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hermes-k8s-operator
+  labels:
+    app.kubernetes.io/name: hermes-k8s-operator
+    app.kubernetes.io/part-of: k8s-test
+subjects:
+  - kind: ServiceAccount
+    name: hermes-master-sa
+    namespace: ai-agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hermes-k8s-operator

@@ -47,6 +47,18 @@ kubectl get pods -n kube-system | grep traefik   # should be gone
 
 Then re-run `./scripts/deploy.sh` or upgrade ingress-nginx.
 
+### Hermes operator RBAC
+
+`manifests/infra/hermes-k8s-operator-rbac.yaml` grants the in-cluster Hermes service account (`ai-agents/hermes-master-sa`) broad Kubernetes operator permissions for monitoring and day-to-day remediation, including PV/PVC patch/update/delete workflows, workload scale/restart/patch operations, Service/Ingress fixes, pod eviction/deletion, pod exec/port-forward for debugging, and node patch/update for cordon/uncordon-style operations.
+
+Apply it once with cluster-admin credentials if Hermes needs to operate the cluster:
+
+```bash
+kubectl apply -f manifests/infra/hermes-k8s-operator-rbac.yaml
+```
+
+The role intentionally keeps RBAC write permissions out; Hermes can read RBAC objects but cannot grant itself or others more privileges.
+
 ### Deploy the Test Environment
 
 To deploy all configurations, infrastructure elements, and applications in the correct order:
