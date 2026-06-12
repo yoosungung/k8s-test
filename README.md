@@ -89,6 +89,137 @@ To remove all components and clean up the namespaces created for testing:
 
 ---
 
+## Recovery & troubleshooting
+
+Runbooks for common failures on the single-node k3s test cluster (`didim-gpu`). After fixing the root cause, workloads usually reconcile within **a few minutes**; image-related failures need extra steps below.
+
+### Node disk pressure (`FailedScheduling` / untolerated taint)
+
+**Symptoms**
+
+```text
+Warning  FailedScheduling  ...  0/1 nodes are available: 1 node(s) had untolerated taint(s).
+```
+
+```bash
+kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'
+# Taints: node.kubernetes.io/disk-pressure:NoSchedule
+# DiskPressure: True
+```
+
+**Cause:** kubelet adds `node.kubernetes.io/disk-pressure:NoSchedule` when disk is low. Pods without that toleration stay `Pending`.
+
+**Fix**
+
+1. Free disk on the node (container images, logs, `/var/lib/rancher`, unused PVC data).
+2. Wait until kubelet clears the condition (typically within 1–2 minutes):
+
+```bash
+kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'
+# DiskPressure: False, Taints: <none>
+```
+
+3. Controllers (Deployment/StatefulSet) schedule new pods automatically. Init-heavy pods (Hermes, Opik backend) may take several more minutes.
+
+**Do not** add tolerations for `disk-pressure` unless you intend to schedule onto a still-starved disk.
+
+### Stale pods after an incident
+
+After disk pressure or node restarts, old pods may remain in `Error` or `ContainerStatusUnknown` while new healthy replicas already run.
+
+```bash
+# See what's unhealthy
+kubectl get pods -A | awk 'NR==1 || $4!="Running" && $4!="Completed"'
+
+# Delete leftovers in one namespace (example: opik)
+kubectl delete pod -n opik \
+  opik-backend-7bddb6568f-2czwv \
+  --ignore-not-found
+```
+
+Prefer **per-namespace, per-pod** deletes. Avoid cluster-wide force-delete unless you know every affected workload.
+
+### git-http-server image missing (`ErrImageNeverPull`)
+
+Chart uses `git-http-server:local` with `imagePullPolicy: Never`. The image must exist in k3s containerd on the node. Disk cleanup often removes it.
+
+**Option A — Mac or node with Docker** (see also [Build the image](#build-the-image-first-time--after-dockerfile-changes)):
+
+```bash
+./scripts/build-git-http-server-image.sh
+# or: GIT_HTTP_BUILD_NODE=didim-gpu@<NODE_IP> ./scripts/build-git-http-server-image.sh
+kubectl rollout restart deploy/git-http-server -n git
+```
+
+**Option B — In-cluster Kaniko** (no SSH, no local Docker; `kubectl` only):
+
+```bash
+# 1) ConfigMap with Dockerfile + nginx config (entrypoint is inlined in Dockerfile for Kaniko)
+kubectl create configmap git-http-server-docker -n git \
+  --from-file=Dockerfile=docker/git-http-server/Dockerfile \
+  --from-file=nginx-default.conf=docker/git-http-server/nginx-default.conf \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 2) Build on didim-gpu and import into k3s containerd
+kubectl apply -f manifests/apps/git-http-server-image-build-job.yaml
+kubectl wait -n git --for=condition=complete job/build-git-http-server-image --timeout=180s
+
+# 3) Restart deployment
+kubectl rollout restart deploy/git-http-server -n git
+kubectl get pods -n git -l app.kubernetes.io/name=git-http-server
+
+# 4) Optional cleanup
+kubectl delete job -n git build-git-http-server-image --ignore-not-found
+```
+
+**Note:** `docker/git-http-server/Dockerfile` embeds the entrypoint via `printf` because Kaniko + ConfigMap context does not reliably `COPY` a separate `entrypoint.sh`. Keep `docker/git-http-server/entrypoint.sh` in sync when you change startup logic.
+
+**Verify image on node** (requires a node debug pod or shell on the node):
+
+```bash
+kubectl debug node/didim-gpu --profile=sysadmin --image=busybox:1.36 -- sleep 300
+# Pod lands in the current namespace; then:
+kubectl exec -n <ns> node-debugger-didim-gpu-<suffix> -- \
+  chroot /host k3s ctr images ls | grep git-http-server
+```
+
+### SGLang image pull failures (`ImagePullBackOff`)
+
+Large image `lmsysorg/sglang:dev-cu12` (~10 GB). Concurrent pulls after disk recovery can hit registry QPS limits (`pull QPS exceeded`).
+
+```bash
+# Stop failing pull loops
+kubectl scale deploy -n llm-serving sglang-gemma4-12b --replicas=0
+
+# Pre-pull on the node (via node debug pod; replace namespace/pod name)
+kubectl debug node/didim-gpu --profile=sysadmin --image=busybox:1.36 -- sleep 600
+kubectl exec -n <ns> node-debugger-didim-gpu-<suffix> -- \
+  chroot /host k3s ctr images pull docker.io/lmsysorg/sglang:dev-cu12
+
+# Restore replicas
+kubectl scale deploy -n llm-serving sglang-gemma4-12b --replicas=2
+kubectl rollout status deploy -n llm-serving sglang-gemma4-12b --timeout=30m
+
+# Verify
+./scripts/verify-sglang.sh
+```
+
+Manifest uses `imagePullPolicy: IfNotPresent`, so a successful node pull is reused by new pods.
+
+### Recovery checklist (quick)
+
+| Workload | Ready check | If not healthy |
+| -------- | ----------- | -------------- |
+| Node | `DiskPressure: False`, no disk taint | Free disk on node |
+| Hermes | `kubectl get sts -n ai-agents hermes-master` | Wait for init; check secrets |
+| Opik | `kubectl get deploy -n opik` | Wait for init images; delete stale pods |
+| ingress-nginx | `kubectl get deploy -n ingress-nginx` | Delete unknown pods; helm upgrade if ports stuck |
+| postgresql | `kubectl get sts -n postgres` | Wait for PVC; check evicted pods |
+| SGLang | `2/2` in `llm-serving` | Pre-pull image (above) |
+| git-http-server | `1/1` in `git` | Rebuild/import image (above) |
+
+---
+
 ## External access (shared Ingress)
 
 Apps use **ClusterIP** Services and reach the LAN via the shared [ingress-nginx](https://kubernetes.github.io/ingress-nginx/) controller. Host-based routing uses **`*.k8s-test`**; the URL **port matches each app’s Service port** (e.g. Opik **5173**, SGLang **30000**, Git **80**). The controller binds those ports on the node with **hostPort** (and a small socat sidecar for extra HTTP/TCP aliases), so you do not use a shared **30080** hop.
@@ -225,7 +356,11 @@ Override credentials when deploying: `GIT_HTTP_USER`, `GIT_HTTP_PASSWORD` in `sc
 
 #### Build the image (first-time / after Dockerfile changes)
 
-Chart uses `git-http-server:local` with `pullPolicy: Never` — build on the node or Mac, then import into k3s:
+Chart uses `git-http-server:local` with `pullPolicy: Never` — build on the node or Mac, then import into k3s.
+
+If the pod shows **`ErrImageNeverPull`** after disk cleanup, see [git-http-server image missing](#git-http-server-image-missing-errimageneverpull) in Recovery & troubleshooting.
+
+**Option A — `scripts/build-git-http-server-image.sh`** (Mac Docker or SSH to node):
 
 ```bash
 # Mac: start Docker first (builds linux/amd64 for the GPU node by default)
@@ -236,6 +371,8 @@ colima start
 GIT_HTTP_BUILD_NODE=didim-gpu@192.168.150.200 ./scripts/build-git-http-server-image.sh
 kubectl rollout restart deploy/git-http-server -n git
 ```
+
+**Option B — In-cluster Kaniko** (`kubectl` only): [Recovery & troubleshooting → git-http-server image missing](#git-http-server-image-missing-errimageneverpull).
 
 After `GIT_HTTP_IMPORT_NODE=...`, the tarball is copied to the node; **run import on the node** (Mac `ssh sudo` often fails without a TTY):
 

@@ -1,6 +1,5 @@
-# One-off in-cluster build for git-http-server:local (k3s nodes without Docker).
-# Apply: kubectl apply -f manifests/apps/git-http-server-image-build-job.yaml
-# Import runs in the same pod after kaniko writes the tar to hostPath.
+# In-cluster build for git-http-server:local when SSH/Docker are unavailable.
+# See README.md → "Recovery after disk pressure" → "git-http-server image missing".
 apiVersion: batch/v1
 kind: Job
 metadata:

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Build git-http-server:local and make it available to k3s/containerd.
+# If SSH and local Docker are unavailable, use the in-cluster Kaniko job documented in
+# README.md → Recovery & troubleshooting → git-http-server image missing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

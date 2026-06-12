@@ -49,4 +49,20 @@ Ensure all new files conform to the following directory layout:
 
 ## 4. Updates & Maintenance
 * When adding a new Helm chart or raw manifest, ensure it is added to `/scripts/deploy.sh` and `/scripts/teardown.sh` in the correct order of dependencies (e.g. namespaces first, then CRDs, then infrastructure, then applications).
-* Ensure `README.md` is updated if there are new prerequisites or manual steps required.
+* **Always update `README.md`** when you add or change anything that affects operations: new manifests, recovery runbooks, image build paths, env vars, ingress hosts, or manual cluster steps. Operational knowledge belongs in the README (not only in chat or commit messages). Link to the relevant manifest or script path.
+* For incident-style fixes (scheduling failures, image pull issues, node pressure), add or extend the **Recovery & troubleshooting** section in `README.md` with symptoms, root cause, and copy-paste commands.
+
+---
+
+## 5. Recovery & cluster hygiene (quick reference)
+
+See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary for agents:
+
+| Symptom | Typical cause | First check |
+| -------- | ------------- | ----------- |
+| `FailedScheduling` + `untolerated taint` | Node `DiskPressure` → `node.kubernetes.io/disk-pressure:NoSchedule` | `kubectl describe node <node> \| grep -E 'Taints|DiskPressure'` |
+| `ErrImageNeverPull` on `git-http-server:local` | Image not on k3s node (often after disk cleanup) | In-cluster Kaniko job or `scripts/build-git-http-server-image.sh` |
+| `ImagePullBackOff` on SGLang | Registry rate limit or concurrent pulls | Scale deployment to 0, pre-pull on node with `k3s ctr images pull`, scale back |
+| `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
+
+Before destructive cluster-wide cleanup (`--field-selector`, force-delete all namespaces), prefer **targeted** pod deletes in the affected namespace only.
