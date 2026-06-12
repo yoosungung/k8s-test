@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Post-deploy checks for SGLang (gemma-4-31B). See manifests/apps/sglang-gemma4-31b.yaml.
+# Post-deploy checks for SGLang (gemma-4-12B). See manifests/apps/sglang-gemma4-12b.yaml.
 set -euo pipefail
 
 NAMESPACE="${SGLANG_NAMESPACE:-llm-serving}"
-DEPLOY="${SGLANG_DEPLOY:-sglang-gemma4-31b}"
+DEPLOY="${SGLANG_DEPLOY:-sglang-gemma4-12b}"
+SGLANG_MODEL="${SGLANG_MODEL:-nmilosev/gemma-4-12B-it-quantized.w4a16}"
+MIN_REPLICAS="${SGLANG_MIN_REPLICAS:-2}"
 MIN_MAX_TOTAL_TOKENS="${SGLANG_MIN_MAX_TOTAL_TOKENS:-8192}"
 
 GREEN='\033[0;32m'
@@ -19,8 +21,19 @@ echo "Context: $(kubectl config current-context)"
 echo "Waiting for rollout..."
 kubectl rollout status "deploy/${DEPLOY}" -n "${NAMESPACE}" --timeout=900s
 
+ready="$(kubectl get deploy "${DEPLOY}" -n "${NAMESPACE}" -o jsonpath='{.status.readyReplicas}')"
+replicas="$(kubectl get deploy "${DEPLOY}" -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}')"
+echo "Replicas: ${ready:-0}/${replicas} ready"
+if [ "${ready:-0}" -lt "${MIN_REPLICAS}" ]; then
+  fail "Expected >= ${MIN_REPLICAS} ready replicas, got ${ready:-0}"
+fi
+ok "Deployment has ${ready} ready replica(s)"
+
+endpoints="$(kubectl get endpoints -n "${NAMESPACE}" "${DEPLOY}" -o jsonpath='{.subsets[0].addresses[*].ip}' 2>/dev/null || true)"
+echo "Service endpoints: ${endpoints:-none}"
+
 pod="$(kubectl get pods -n "${NAMESPACE}" -l "app=${DEPLOY}" -o jsonpath='{.items[0].metadata.name}')"
-echo "Pod: ${pod}"
+echo "Sample pod: ${pod}"
 
 echo ""
 echo "=== Launch args (context-length, tp/dp, cuda-graph) ==="
@@ -68,25 +81,25 @@ sglang_base="http://${node_ip}:${ingress_port}"
 tool_resp="$(curl -sf --max-time 120 "${sglang_base}/v1/chat/completions" \
   -H "Host: ${sglang_host}" \
   -H 'Content-Type: application/json' \
-  -d '{
-    "model": "QuantTrio/gemma-4-31B-it-AWQ",
-    "messages": [{"role": "user", "content": "List tables for adventureworks using search_tables."}],
-    "tools": [{
-      "type": "function",
-      "function": {
-        "name": "search_tables",
-        "description": "Search MDL tables",
-        "parameters": {
-          "type": "object",
-          "properties": {"query": {"type": "string"}},
-          "required": ["query"]
+  -d "{
+    \"model\": \"${SGLANG_MODEL}\",
+    \"messages\": [{\"role\": \"user\", \"content\": \"List tables for adventureworks using search_tables.\"}],
+    \"tools\": [{
+      \"type\": \"function\",
+      \"function\": {
+        \"name\": \"search_tables\",
+        \"description\": \"Search MDL tables\",
+        \"parameters\": {
+          \"type\": \"object\",
+          \"properties\": {\"query\": {\"type\": \"string\"}},
+          \"required\": [\"query\"]
         }
       }
     }],
-    "tool_choice": "auto",
-    "max_tokens": 128,
-    "temperature": 0.1
-  }' 2>/dev/null || true)"
+    \"tool_choice\": \"auto\",
+    \"max_tokens\": 128,
+    \"temperature\": 0.1
+  }" 2>/dev/null || true)"
 if [ -z "${tool_resp}" ]; then
   warn "Tool-call probe HTTP failed (server loading?)"
 else

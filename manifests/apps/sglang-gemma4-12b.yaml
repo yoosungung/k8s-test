@@ -1,0 +1,125 @@
+# Gemma 4 12B: 2 independent SGLang instances (1 GPU each) behind one Service + Ingress.
+# nginx-ingress round-robins across pod endpoints for concurrent throughput.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang-gemma4-12b
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: sglang-gemma4-12b
+spec:
+  replicas: 2
+  # maxSurge=0: 2-GPU node cannot host a 3rd pod during rollout.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: sglang-gemma4-12b
+  template:
+    metadata:
+      labels:
+        app: sglang-gemma4-12b
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: sglang
+        image: lmsysorg/sglang:dev-cu12
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -lc
+        - |
+          set -eu
+          TF_COMMIT=1423d22f7a3b62e8c70ad67b58ec25cd9b675897
+          python3 - <<'CHECK' || python3 -m pip install --no-cache-dir --retries 5 --timeout 120 --upgrade "git+https://github.com/huggingface/transformers.git@${TF_COMMIT}"
+          from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+          if "gemma4_unified" not in CONFIG_MAPPING:
+              raise SystemExit(1)
+          CHECK
+          exec sglang serve \
+            --model-path nmilosev/gemma-4-12B-it-quantized.w4a16 \
+            --mem-fraction-static 0.75 \
+            --context-length 16384 \
+            --reasoning-parser gemma4 \
+            --tool-call-parser gemma4 \
+            --host 0.0.0.0 \
+            --port 30000
+        env:
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: expandable_segments:True
+        - name: HF_HOME
+          value: /hf_cache
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token-secret
+              key: token
+        - name: NCCL_P2P_DISABLE
+          value: "1"
+        - name: NCCL_IB_DISABLE
+          value: "1"
+        - name: NCCL_SHM_DISABLE
+          value: "0"
+        ports:
+        - containerPort: 30000
+          name: http
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+          requests:
+            nvidia.com/gpu: "1"
+        startupProbe:
+          httpGet:
+            path: /v1/models
+            port: 30000
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 120
+        readinessProbe:
+          httpGet:
+            path: /v1/models
+            port: 30000
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /v1/models
+            port: 30000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 6
+        volumeMounts:
+        - name: model-cache
+          mountPath: /hf_cache
+        - name: dshm
+          mountPath: /dev/shm
+      volumes:
+      - name: model-cache
+        hostPath:
+          path: /Users/suyoo/hf_cache
+          type: DirectoryOrCreate
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 32Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang-gemma4-12b
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: sglang-gemma4-12b
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 30000
+    targetPort: 30000
+  selector:
+    app: sglang-gemma4-12b
