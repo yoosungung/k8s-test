@@ -42,6 +42,25 @@ rules:
       - events
     verbs: ["get", "list", "watch"]
 
+  # Node and pod resource metrics. Required for `kubectl top nodes/pods`
+  # and for daily CPU/memory pressure checks via metrics-server.
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - nodes
+      - pods
+    verbs: ["get", "list", "watch"]
+
+  # Kubelet read-only stats endpoints. These expose node filesystem/imagefs,
+  # pod volume, CPU, and memory usage details that the core Kubernetes API does
+  # not surface directly. Needed for disk/PVC usage monitoring and early
+  # DiskPressure detection.
+  - apiGroups: [""]
+    resources:
+      - nodes/proxy
+      - nodes/stats
+      - nodes/metrics
+    verbs: ["get"]
+
   - apiGroups: ["apps"]
     resources:
       - deployments
