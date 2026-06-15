@@ -16,6 +16,8 @@ spec:
         app.kubernetes.io/name: dcgm-exporter
         app.kubernetes.io/part-of: k8s-test
     spec:
+      # k3s default runtime is runc; NVML requires the nvidia container runtime.
+      runtimeClassName: nvidia
       tolerations:
         - operator: Exists
       containers:
