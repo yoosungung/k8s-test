@@ -59,6 +59,20 @@ kubectl apply -f manifests/infra/hermes-k8s-operator-rbac.yaml
 
 The role intentionally keeps RBAC write permissions out; Hermes can read RBAC objects but cannot grant itself or others more privileges.
 
+### GPU telemetry (DCGM exporter)
+
+`manifests/infra/dcgm-exporter.yaml` provides NVIDIA DCGM metrics on port `9400` in the `gpu-operator` namespace. It is applied automatically by `./scripts/deploy.sh` because it lives under `manifests/infra/`; apply it directly with cluster-admin credentials if you only want GPU telemetry:
+
+```bash
+kubectl apply -f manifests/infra/gpu-operator-namespace.yaml
+kubectl apply -f manifests/infra/dcgm-exporter.yaml
+kubectl rollout status daemonset/dcgm-exporter -n gpu-operator --timeout=180s
+kubectl -n gpu-operator port-forward svc/dcgm-exporter 9400:9400
+curl -s localhost:9400/metrics | grep -E 'DCGM_FI_DEV_GPU_UTIL|DCGM_FI_DEV_FB_USED' | head
+```
+
+The exporter is intentionally separate from workload GPU requests so it does not reserve a GPU through the scheduler.
+
 ### Deploy the Test Environment
 
 To deploy all configurations, infrastructure elements, and applications in the correct order:
