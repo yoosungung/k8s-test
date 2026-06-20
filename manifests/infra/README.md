@@ -3,7 +3,7 @@
 This directory contains raw Kubernetes manifests responsible for setting up base infrastructure services and configurations.
 
 ## Target Components
-- **Namespaces**: Core namespace configurations (`postgres`, `git`, `ingress-nginx`, …).
+- **Namespaces**: Core namespace configurations (`postgres`, `git`, `ingress-nginx`, `nebula`, `nebula-operator-system`, …).
 - **Node Configurations**: GPU node settings, node label configurations, node affinities, and taints.
 - **Storage**: PersistentVolumes, PersistentVolumeClaims, and StorageClasses.
 - **Security & RBAC**: Roles, RoleBindings, ClusterRoles, ClusterRoleBindings, and ServiceAccounts for infra services.

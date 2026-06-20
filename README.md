@@ -81,6 +81,21 @@ To deploy all configurations, infrastructure elements, and applications in the c
 ./scripts/deploy.sh
 ```
 
+`deploy.sh` applies resources in dependency order:
+
+1. **Namespaces & infra** — `manifests/infra/` (including `nebula`, `nebula-operator-system`, postgres, git, …)
+2. **Helm releases** — ingress-nginx → PostgreSQL (+ pgvector) → **NebulaGraph Operator + cluster** → git-http-server → Opik
+3. **Secrets** — Hugging Face, Hermes gateway/auth
+4. **Apps** — `manifests/apps/` (Hermes, SGLang, ingress routes, …)
+
+NebulaGraph-only reinstall (after namespaces exist):
+
+```bash
+helm repo add nebula-operator https://vesoft-inc.github.io/nebula-operator/charts
+# or rely on deploy_nebula() inside deploy.sh:
+NEBULA_STORAGE_CLASS=local-path ./scripts/deploy.sh --force
+```
+
 For Hermes agents, you can provide secrets via environment variables (non-interactive):
 
 ```bash
@@ -220,6 +235,38 @@ kubectl rollout status deploy -n llm-serving sglang-gemma4-12b --timeout=30m
 
 Manifest uses `imagePullPolicy: IfNotPresent`, so a successful node pull is reused by new pods.
 
+### NebulaGraph PVC Pending or cluster not ready
+
+**Symptoms**
+
+```bash
+kubectl get nc -n nebula
+# READY=False   or   GRAPHD-READY 0 / METAD-READY 0 / STORAGED-READY 0
+
+kubectl get pvc -n nebula
+# STATUS Pending (may be normal briefly with WaitForFirstConsumer)
+```
+
+**Cause:** StorageClass `local-path` uses `WaitForFirstConsumer` — PVCs bind only after NebulaGraph pods are scheduled. If pods stay `Pending`, the node may have `disk-pressure` taint or insufficient CPU/memory.
+
+**Fix**
+
+```bash
+kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'
+kubectl get pods -n nebula -o wide
+kubectl describe pod -n nebula nebula-metad-0   # or graphd/storaged
+
+# Reconcile via Helm if values changed
+helm upgrade --install nebula nebula-operator/nebula-cluster \
+  -n nebula --version 1.8.0 \
+  -f helm/values/nebula-cluster.yaml \
+  --set nebula.storageClassName=local-path --wait --timeout 15m
+
+kubectl wait --for=condition=Ready nebulacluster/nebula -n nebula --timeout=300s
+```
+
+See [NebulaGraph](#nebulagraph) for connection and teardown (CRD cleanup).
+
 ### Recovery checklist (quick)
 
 | Workload | Ready check | If not healthy |
@@ -231,6 +278,7 @@ Manifest uses `imagePullPolicy: IfNotPresent`, so a successful node pull is reus
 | postgresql | `kubectl get sts -n postgres` | Wait for PVC; check evicted pods |
 | SGLang | `2/2` in `llm-serving` | Pre-pull image (above) |
 | git-http-server | `1/1` in `git` | Rebuild/import image (above) |
+| NebulaGraph | `kubectl get nc -n nebula nebula` → `READY=True` | Check PVC/Pod Pending; see [NebulaGraph](#nebulagraph) |
 
 ---
 
@@ -255,6 +303,7 @@ Add to `/etc/hosts`:
 | Hermes API | `hermes-api.k8s-test` | `http://hermes-api.k8s-test:8642/` | `hermes-master.ai-agents.svc.cluster.local:8642` |
 | SGLang OpenAI | `sglang.k8s-test` | `http://sglang.k8s-test:30000/v1/` | `sglang-gemma4-31b.llm-serving.svc.cluster.local:30000` |
 | Git HTTP | `git.k8s-test` | `http://git.k8s-test:80/git/<repo>.git` | `git-http-server.git.svc.cluster.local/git/…` |
+| NebulaGraph graphd | — | `nebula-console -addr <NODE_IP> -port <NodePort> -u root -p nebula` | `nebula-graphd-svc.nebula.svc.cluster.local:9669` |
 
 Ingress definitions: `[manifests/apps/ingress-routes.yaml](manifests/apps/ingress-routes.yaml)` (Git: `[helm/charts/git-http-server](helm/charts/git-http-server)`). Controller values: `[helm/values/ingress-nginx.yaml](helm/values/ingress-nginx.yaml)`.
 
@@ -290,6 +339,72 @@ export OPIK_URL_OVERRIDE="http://opik-frontend.opik.svc.cluster.local:5173/api"
 ```
 
 Override the chart image tag with `OPIK_VERSION` (default `latest`), e.g. `OPIK_VERSION=2.0.18 ./scripts/deploy.sh`.
+
+### NebulaGraph
+
+[NebulaGraph](https://github.com/vesoft-inc/nebula) v3.8.0 is installed via [NebulaGraph Operator](https://docs.nebula-graph.io/3.8.0/k8s-operator/) when you run `./scripts/deploy.sh`. Values: [`helm/values/nebula-operator.yaml`](helm/values/nebula-operator.yaml), [`helm/values/nebula-cluster.yaml`](helm/values/nebula-cluster.yaml).
+
+| Item | Value |
+| -------- | ------ |
+| Operator namespace | `nebula-operator-system` |
+| Cluster namespace | `nebula` |
+| Cluster name | `nebula` |
+| StorageClass | `local-path` (override: `NEBULA_STORAGE_CLASS`) |
+| Chart version | `1.8.0` (override: `NEBULA_OPERATOR_CHART_VERSION`, `NEBULA_CLUSTER_CHART_VERSION`) |
+| Default credentials | user `root`, password `nebula` |
+| Graph port (Thrift) | `9669` (Service); NodePort assigned dynamically (e.g. `32080`) |
+| Graph HTTP (status) | `19669` (Service); NodePort assigned dynamically |
+
+Single-node test layout: graphd/metad/storaged each **1 replica**, PVCs on `local-path` (~8–9 GiB total). Namespaces: [`manifests/infra/nebula-namespace.yaml`](manifests/infra/nebula-namespace.yaml), [`manifests/infra/nebula-operator-namespace.yaml`](manifests/infra/nebula-operator-namespace.yaml).
+
+**Connect from inside the cluster:**
+
+```bash
+kubectl run nebula-console --rm -it --restart=Never \
+  --image vesoft/nebula-console:v3.8.0 -n nebula -- \
+  nebula-console -addr nebula-graphd-svc.nebula.svc.cluster.local -port 9669 -u root -p nebula
+```
+
+Non-interactive smoke test:
+
+```bash
+kubectl run nebula-console-test --restart=Never \
+  --image vesoft/nebula-console:v3.8.0 -n nebula -- \
+  nebula-console -addr nebula-graphd-svc.nebula.svc.cluster.local -port 9669 -u root -p nebula -e 'SHOW HOSTS;'
+kubectl logs nebula-console-test -n nebula
+kubectl delete pod nebula-console-test -n nebula
+```
+
+**Connect from your machine (NodePort):**
+
+```bash
+NODE_PORT="$(kubectl get svc -n nebula nebula-graphd-svc -o jsonpath='{.spec.ports[?(@.name=="thrift")].nodePort}')"
+nebula-console -addr 192.168.150.200 -port "${NODE_PORT}" -u root -p nebula
+```
+
+**Health checks:**
+
+```bash
+kubectl get nc -n nebula
+kubectl get pods -n nebula-operator-system
+kubectl get pods -n nebula
+kubectl get pvc -n nebula
+```
+
+**PVC stays Pending:** With `local-path` and `WaitForFirstConsumer`, PVCs bind only after NebulaGraph pods are scheduled. If pods are Pending, check node taints (`kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'`).
+
+**Teardown:** `./scripts/teardown.sh` removes the cluster and operator Helm releases. CRDs may remain; to remove them:
+
+```bash
+kubectl delete crd \
+  nebulaclusters.apps.nebula-graph.io \
+  nebulaautoscalers.autoscaling.nebula-graph.io \
+  nebularestores.apps.nebula-graph.io \
+  nebulabackups.apps.nebula-graph.io \
+  nebulacronbackups.apps.nebula-graph.io
+```
+
+**Docs:** [Install Operator](https://docs.nebula-graph.io/3.8.0/k8s-operator/2.get-started/2.1.install-operator/) · [Create cluster](https://docs.nebula-graph.io/3.8.0/k8s-operator/2.get-started/2.3.create-cluster/)
 
 ### Git HTTP server
 
@@ -455,7 +570,7 @@ chmod +x scripts/verify-sglang.sh
 ### 1. [Helm (`/helm`)](file:///Users/suyoo/Documents/works/test_infra/helm/)
 
 - **Custom Charts**: Put charts that you build internally inside `helm/charts/`.
-- **Values Overrides**: Place values files for public charts inside `helm/values/` (e.g. `ingress-nginx.yaml`).
+- **Values Overrides**: Place values files for public charts inside `helm/values/` (e.g. `ingress-nginx.yaml`, `postgresql.yaml`, `nebula-operator.yaml`, `nebula-cluster.yaml`).
 
 ### 2. [Manifests (`/manifests`)](file:///Users/suyoo/Documents/works/test_infra/manifests/)
 

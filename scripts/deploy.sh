@@ -49,6 +49,14 @@ BUILD_GIT_HTTP_IMAGE="${BUILD_GIT_HTTP_IMAGE:-true}"
 GIT_HTTP_IMAGE_REPO="${GIT_HTTP_IMAGE_REPO:-git-http-server}"
 GIT_HTTP_IMAGE_TAG="${GIT_HTTP_IMAGE_TAG:-local}"
 
+NEBULA_OPERATOR_NAMESPACE="nebula-operator-system"
+NEBULA_OPERATOR_RELEASE="nebula-operator"
+NEBULA_CLUSTER_NAMESPACE="nebula"
+NEBULA_CLUSTER_RELEASE="nebula"
+NEBULA_OPERATOR_CHART_VERSION="${NEBULA_OPERATOR_CHART_VERSION:-1.8.0}"
+NEBULA_CLUSTER_CHART_VERSION="${NEBULA_CLUSTER_CHART_VERSION:-1.8.0}"
+NEBULA_STORAGE_CLASS="${NEBULA_STORAGE_CLASS:-local-path}"
+
 apply_hermes_gateway_secret() {
     local discord_token="$1"
     local openai_key="$2"
@@ -129,6 +137,41 @@ ensure_pgvector_extension() {
     else
         log_warn "Failed to enable pgvector automatically. Check PostgreSQL image compatibility and run CREATE EXTENSION manually."
     fi
+}
+
+deploy_nebula() {
+    log_info "Ensuring NebulaGraph Operator Helm repo is registered..."
+    helm repo add nebula-operator https://vesoft-inc.github.io/nebula-operator/charts 2>/dev/null || true
+    helm repo update nebula-operator
+
+    log_info "Installing/upgrading NebulaGraph Operator (chart ${NEBULA_OPERATOR_CHART_VERSION}) in namespace '${NEBULA_OPERATOR_NAMESPACE}'..."
+    helm upgrade --install "${NEBULA_OPERATOR_RELEASE}" nebula-operator/nebula-operator \
+        --namespace "${NEBULA_OPERATOR_NAMESPACE}" \
+        --create-namespace \
+        --version "${NEBULA_OPERATOR_CHART_VERSION}" \
+        -f "${ROOT_DIR}/helm/values/nebula-operator.yaml" \
+        --wait \
+        --timeout 10m
+
+    log_info "Waiting for NebulaGraph CRDs..."
+    kubectl wait --for=condition=Established crd/nebulaclusters.apps.nebula-graph.io --timeout=120s
+
+    log_info "Installing/upgrading NebulaGraph cluster (chart ${NEBULA_CLUSTER_CHART_VERSION}, v3.8.0) in namespace '${NEBULA_CLUSTER_NAMESPACE}'..."
+    helm upgrade --install "${NEBULA_CLUSTER_RELEASE}" nebula-operator/nebula-cluster \
+        --namespace "${NEBULA_CLUSTER_NAMESPACE}" \
+        --create-namespace \
+        --version "${NEBULA_CLUSTER_CHART_VERSION}" \
+        -f "${ROOT_DIR}/helm/values/nebula-cluster.yaml" \
+        --set "nebula.storageClassName=${NEBULA_STORAGE_CLASS}" \
+        --wait \
+        --timeout 15m
+
+    log_info "Waiting for NebulaGraph cluster to become ready..."
+    kubectl wait --for=condition=Ready nebulacluster/"${NEBULA_CLUSTER_RELEASE}" \
+        -n "${NEBULA_CLUSTER_NAMESPACE}" --timeout=300s
+
+    log_info "NebulaGraph graphd in-cluster: nebula-graphd-svc.${NEBULA_CLUSTER_NAMESPACE}.svc.cluster.local:9669"
+    log_info "NebulaGraph graphd external: kubectl get svc -n ${NEBULA_CLUSTER_NAMESPACE} nebula-graphd-svc (NodePort)"
 }
 
 deploy_ingress_nginx() {
@@ -295,6 +338,8 @@ if [ "$HAS_HELM" = true ]; then
         -f "${ROOT_DIR}/helm/values/postgresql.yaml"
 
     ensure_pgvector_extension
+
+    deploy_nebula
 
     deploy_git_http_server
 

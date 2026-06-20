@@ -1,0 +1,6 @@
+# NebulaGraph Operator — test cluster (k3s, single node)
+# Chart: nebula-operator/nebula-operator 1.8.0
+# Docs: https://docs.nebula-graph.io/3.8.0/k8s-operator/2.get-started/2.1.install-operator/
+
+admissionWebhook:
+  create: false

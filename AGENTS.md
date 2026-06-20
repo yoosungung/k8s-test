@@ -15,7 +15,7 @@ Ensure all new files conform to the following directory layout:
 
 * **`/helm`**: All Helm-related configurations.
   * `/helm/charts/`: Custom helm charts created specifically for this test environment.
-  * `/helm/values/`: Value overrides for third-party helm charts (e.g. ingress-nginx, postgresql).
+  * `/helm/values/`: Value overrides for third-party helm charts (e.g. ingress-nginx, postgresql, nebula-operator, nebula-cluster).
 * **`/manifests`**: Raw Kubernetes YAML manifests.
   * `/manifests/infra/`: Infrastructure-level manifests (e.g. Namespaces, StorageClasses, CRDs, GPU/Node configurations).
   * `/manifests/apps/`: Application-level manifests (e.g. Deployments, Services, ConfigMaps, Secrets).
@@ -63,6 +63,7 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | `FailedScheduling` + `untolerated taint` | Node `DiskPressure` → `node.kubernetes.io/disk-pressure:NoSchedule` | `kubectl describe node <node> \| grep -E 'Taints|DiskPressure'` |
 | `ErrImageNeverPull` on `git-http-server:local` | Image not on k3s node (often after disk cleanup) | In-cluster Kaniko job or `scripts/build-git-http-server-image.sh` |
 | `ImagePullBackOff` on SGLang | Registry rate limit or concurrent pulls | Scale deployment to 0, pre-pull on node with `k3s ctr images pull`, scale back |
+| NebulaGraph PVC `Pending` / `nc` not `READY` | `local-path` WaitForFirstConsumer; pod not scheduled (often disk-pressure taint) | `kubectl get pods,pvc -n nebula`; fix node pressure; see README → NebulaGraph |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
 
 Before destructive cluster-wide cleanup (`--field-selector`, force-delete all namespaces), prefer **targeted** pod deletes in the affected namespace only.
