@@ -84,7 +84,7 @@ To deploy all configurations, infrastructure elements, and applications in the c
 `deploy.sh` applies resources in dependency order:
 
 1. **Namespaces & infra** — `manifests/infra/` (including `nebula`, `nebula-operator-system`, postgres, git, …)
-2. **Helm releases** — ingress-nginx → PostgreSQL (+ pgvector) → **NebulaGraph Operator + cluster** → git-http-server → Opik
+2. **Helm releases** — ingress-nginx → PostgreSQL (+ pgvector) → **Qdrant** → **NebulaGraph Operator + cluster** → git-http-server → Opik
 3. **Secrets** — Hugging Face, Hermes gateway/auth
 4. **Apps** — `manifests/apps/` (Hermes, SGLang, ingress routes, …)
 
@@ -95,6 +95,18 @@ helm repo add nebula-operator https://vesoft-inc.github.io/nebula-operator/chart
 # or rely on deploy_nebula() inside deploy.sh:
 NEBULA_STORAGE_CLASS=local-path ./scripts/deploy.sh --force
 ```
+
+Qdrant-only reinstall (after namespace exists):
+
+```bash
+helm repo add qdrant https://qdrant.github.io/qdrant-helm
+helm upgrade --install qdrant qdrant/qdrant \
+  -n qdrant -f helm/values/qdrant.yaml \
+  --set "apiKey=${QDRANT_API_KEY:-test-qdrant-api-key}" --wait --timeout 10m
+./scripts/verify-qdrant.sh
+```
+
+See [Qdrant](#qdrant-vector-database) for full connection and troubleshooting docs.
 
 For Hermes agents, you can provide secrets via environment variables (non-interactive):
 
@@ -267,6 +279,37 @@ kubectl wait --for=condition=Ready nebulacluster/nebula -n nebula --timeout=300s
 
 See [NebulaGraph](#nebulagraph) for connection and teardown (CRD cleanup).
 
+### Qdrant PVC Pending or pod not ready
+
+**Symptoms**
+
+```bash
+kubectl get pods -n qdrant
+# qdrant-0   0/1   Pending
+
+kubectl get pvc -n qdrant
+# STATUS Pending (may be normal briefly with WaitForFirstConsumer)
+```
+
+**Cause:** StorageClass `local-path` uses `WaitForFirstConsumer` — the PVC binds only after `qdrant-0` is scheduled. If the pod stays `Pending`, the node may have `disk-pressure` taint or insufficient CPU/memory.
+
+**Fix**
+
+```bash
+kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'
+kubectl get pods,pvc -n qdrant -o wide
+kubectl describe pod -n qdrant qdrant-0
+
+# Reconcile via Helm if values changed
+helm upgrade --install qdrant qdrant/qdrant \
+  -n qdrant -f helm/values/qdrant.yaml \
+  --set "apiKey=${QDRANT_API_KEY:-test-qdrant-api-key}" --wait --timeout 10m
+
+./scripts/verify-qdrant.sh
+```
+
+See [Qdrant](#qdrant-vector-database) for connection, upgrade, and teardown.
+
 ### Recovery checklist (quick)
 
 | Workload | Ready check | If not healthy |
@@ -279,6 +322,7 @@ See [NebulaGraph](#nebulagraph) for connection and teardown (CRD cleanup).
 | SGLang | `2/2` in `llm-serving` | Pre-pull image (above) |
 | git-http-server | `1/1` in `git` | Rebuild/import image (above) |
 | NebulaGraph | `kubectl get nc -n nebula nebula` → `READY=True` | Check PVC/Pod Pending; see [NebulaGraph](#nebulagraph) |
+| Qdrant | `kubectl get pods -n qdrant` → `qdrant-0` Running | `./scripts/verify-qdrant.sh`; check PVC/Pod Pending on disk pressure |
 
 ---
 
@@ -298,6 +342,8 @@ Add to `/etc/hosts`:
 | -------- | ------ | ------------ | ---------- |
 | Ingress (HTTP/HTTPS) | — | `http://<NODE_IP>:80` / `https://<NODE_IP>:443` | — |
 | PostgreSQL | — | `psql -h <NODE_IP> -p 5432 …` | `postgresql.postgres.svc.cluster.local:5432` |
+| Qdrant REST | — | `curl -H 'api-key: <key>' http://<NODE_IP>:6333/collections` | `qdrant.qdrant.svc.cluster.local:6333` |
+| Qdrant gRPC | — | `<NODE_IP>:6334` | `qdrant.qdrant.svc.cluster.local:6334` |
 | Opik UI | `opik.k8s-test` | `http://opik.k8s-test:5173/` | `opik-frontend.opik.svc.cluster.local:5173` |
 | Hermes dashboard | `hermes.k8s-test` | `http://hermes.k8s-test:9119/` | `hermes-master.ai-agents.svc.cluster.local:9119` |
 | Hermes API | `hermes-api.k8s-test` | `http://hermes-api.k8s-test:8642/` | `hermes-master.ai-agents.svc.cluster.local:8642` |
@@ -339,6 +385,191 @@ export OPIK_URL_OVERRIDE="http://opik-frontend.opik.svc.cluster.local:5173/api"
 ```
 
 Override the chart image tag with `OPIK_VERSION` (default `latest`), e.g. `OPIK_VERSION=2.0.18 ./scripts/deploy.sh`.
+
+### Qdrant (vector database)
+
+[Qdrant](https://qdrant.tech/) is a vector similarity search engine used for RAG, semantic search, and embedding storage. It is installed via the [official Helm chart](https://github.com/qdrant/qdrant-helm) when you run `./scripts/deploy.sh`.
+
+| Item | Value |
+| -------- | ------ |
+| Namespace | `qdrant` |
+| Release name | `qdrant` |
+| Workload | StatefulSet (`qdrant-0`) |
+| Qdrant version | Chart default (currently v1.18.x) |
+| StorageClass | `local-path` (8 GiB PVC) |
+| REST port | `6333` (HTTP API + Web UI) |
+| gRPC port | `6334` |
+| External access | ingress-nginx TCP stream on host `:6333` / `:6334` |
+| API key (test default) | `test-qdrant-api-key` |
+| Chart version | latest from repo |
+
+**Files:** [`helm/values/qdrant.yaml`](helm/values/qdrant.yaml), [`manifests/infra/qdrant-namespace.yaml`](manifests/infra/qdrant-namespace.yaml), [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) (TCP ports), [`scripts/test-qdrant-config.sh`](scripts/test-qdrant-config.sh), [`scripts/verify-qdrant.sh`](scripts/verify-qdrant.sh).
+
+Single-node test layout: **1 replica**, Raft cluster mode **disabled** (`config.cluster.enabled: false`). Suitable for local development and integration tests; not HA.
+
+#### Environment variables (`deploy.sh`)
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `QDRANT_API_KEY` | `test-qdrant-api-key` | REST/gRPC authentication key |
+| `QDRANT_CHART_VERSION` | *(empty = latest)* | Pin Helm chart version |
+
+```bash
+QDRANT_API_KEY="$(openssl rand -hex 32)" ./scripts/deploy.sh --force
+```
+
+#### Connect from inside the cluster
+
+```bash
+# REST health / list collections
+curl -H "api-key: test-qdrant-api-key" \
+  http://qdrant.qdrant.svc.cluster.local:6333/collections
+
+# Web UI (browser from a machine that can reach the cluster)
+# http://qdrant.qdrant.svc.cluster.local:6333/dashboard
+```
+
+**Pod env for workloads** (e.g. RAG services in `ai-agents`):
+
+```yaml
+env:
+  - name: QDRANT_URL
+    value: "http://qdrant.qdrant.svc.cluster.local:6333"
+  - name: QDRANT_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: qdrant-credentials   # create separately for non-default keys
+        key: api-key
+```
+
+#### Connect from your machine (LAN)
+
+Replace `<NODE_IP>` with the cluster node (e.g. `192.168.150.200`). Requires ingress-nginx upgrade with TCP ports in [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml).
+
+```bash
+# REST
+curl -H "api-key: test-qdrant-api-key" \
+  http://<NODE_IP>:6333/collections
+
+# Web UI
+open "http://<NODE_IP>:6333/dashboard"
+```
+
+**Python client:**
+
+```bash
+pip install qdrant-client
+```
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+
+client = QdrantClient(
+    url="http://<NODE_IP>:6333",
+    api_key="test-qdrant-api-key",
+)
+
+# Create a collection
+client.create_collection(
+    collection_name="demo",
+    vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+)
+
+print(client.get_collections())
+```
+
+**gRPC client** (lower latency; same API key):
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    host="<NODE_IP>",
+    port=6334,
+    api_key="test-qdrant-api-key",
+    prefer_grpc=True,
+)
+```
+
+#### Port-forward (no ingress-nginx TCP)
+
+```bash
+kubectl port-forward -n qdrant svc/qdrant 6333:6333 6334:6334
+curl -H "api-key: test-qdrant-api-key" http://127.0.0.1:6333/collections
+```
+
+#### Validate and verify
+
+**Before deploy** (Helm template + namespace dry-run):
+
+```bash
+chmod +x scripts/test-qdrant-config.sh scripts/verify-qdrant.sh
+./scripts/test-qdrant-config.sh
+```
+
+**After deploy:**
+
+```bash
+./scripts/verify-qdrant.sh
+```
+
+#### Health checks
+
+```bash
+kubectl get sts,pods,pvc,svc -n qdrant
+kubectl logs -n qdrant qdrant-0 --tail=50
+curl -s -H "api-key: test-qdrant-api-key" http://<NODE_IP>:6333/ | head
+```
+
+#### Qdrant-only reinstall
+
+```bash
+helm repo add qdrant https://qdrant.github.io/qdrant-helm
+helm upgrade --install qdrant qdrant/qdrant \
+  -n qdrant -f helm/values/qdrant.yaml \
+  --set "apiKey=${QDRANT_API_KEY:-test-qdrant-api-key}" \
+  --wait --timeout 10m
+
+# Re-apply ingress TCP if external access is missing
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  -n ingress-nginx -f helm/values/ingress-nginx.yaml --wait --timeout 15m
+
+./scripts/verify-qdrant.sh
+```
+
+#### Upgrade chart / Qdrant version
+
+```bash
+helm repo update qdrant
+helm upgrade qdrant qdrant/qdrant -n qdrant \
+  -f helm/values/qdrant.yaml \
+  --set "apiKey=${QDRANT_API_KEY:-test-qdrant-api-key}" \
+  --wait --timeout 10m
+```
+
+To pin a specific Qdrant image, set `image.tag` in [`helm/values/qdrant.yaml`](helm/values/qdrant.yaml) (e.g. `v1.18.2`).
+
+#### Teardown
+
+`./scripts/teardown.sh` uninstalls the Helm release. To remove data PVCs as well:
+
+```bash
+helm uninstall qdrant -n qdrant
+kubectl delete pvc -n qdrant -l app.kubernetes.io/instance=qdrant
+```
+
+#### Troubleshooting
+
+| Symptom | Likely cause | Action |
+| -------- | ------------- | ------ |
+| `qdrant-0` Pending | Node disk-pressure taint | See [Node disk pressure](#node-disk-pressure-failedscheduling--untolerated-taint) |
+| PVC Pending | `WaitForFirstConsumer`; pod not scheduled | `kubectl describe pod -n qdrant qdrant-0` |
+| `401` / `403` on REST | Wrong or missing `api-key` header | Match `QDRANT_API_KEY` / [`helm/values/qdrant.yaml`](helm/values/qdrant.yaml) |
+| External `:6333` unreachable | ingress-nginx TCP not applied | `helm upgrade` ingress-nginx with [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) |
+| Data lost after reinstall | PVC deleted | Back up snapshots before teardown; see [Qdrant snapshots](https://qdrant.tech/documentation/concepts/snapshots/) |
+
+**PVC stays Pending:** With `local-path` and `WaitForFirstConsumer`, PVCs bind only after `qdrant-0` is scheduled. If the pod is Pending, check node taints (`kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'`).
 
 ### NebulaGraph
 
@@ -570,7 +801,7 @@ chmod +x scripts/verify-sglang.sh
 ### 1. [Helm (`/helm`)](file:///Users/suyoo/Documents/works/test_infra/helm/)
 
 - **Custom Charts**: Put charts that you build internally inside `helm/charts/`.
-- **Values Overrides**: Place values files for public charts inside `helm/values/` (e.g. `ingress-nginx.yaml`, `postgresql.yaml`, `nebula-operator.yaml`, `nebula-cluster.yaml`).
+- **Values Overrides**: Place values files for public charts inside `helm/values/` (e.g. `ingress-nginx.yaml`, `postgresql.yaml`, `qdrant.yaml`, `nebula-operator.yaml`, `nebula-cluster.yaml`).
 
 ### 2. [Manifests (`/manifests`)](file:///Users/suyoo/Documents/works/test_infra/manifests/)
 

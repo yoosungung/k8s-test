@@ -9,14 +9,15 @@ This directory is dedicated to Helm charts and release configuration values.
 
 ## Installed third-party charts (via `deploy.sh`)
 
-| Release | Chart | Values file |
-| -------- | ----- | ------------- |
-| `ingress-nginx` | `ingress-nginx/ingress-nginx` | `helm/values/ingress-nginx.yaml` |
-| `postgresql` | `bitnami/postgresql` | `helm/values/postgresql.yaml` |
-| `nebula-operator` | `nebula-operator/nebula-operator` | `helm/values/nebula-operator.yaml` |
-| `nebula` | `nebula-operator/nebula-cluster` | `helm/values/nebula-cluster.yaml` |
-| `git-http-server` | `helm/charts/git-http-server` | `helm/values/git-http-server.yaml` |
-| `opik` | `opik/opik` | `helm/values/opik.yaml` |
+| Release | Chart | Values file | Verify script |
+| -------- | ----- | ------------- | ------------- |
+| `ingress-nginx` | `ingress-nginx/ingress-nginx` | `helm/values/ingress-nginx.yaml` | — |
+| `postgresql` | `bitnami/postgresql` | `helm/values/postgresql.yaml` | — |
+| `qdrant` | `qdrant/qdrant` | `helm/values/qdrant.yaml` | `scripts/test-qdrant-config.sh`, `scripts/verify-qdrant.sh` |
+| `nebula-operator` | `nebula-operator/nebula-operator` | `helm/values/nebula-operator.yaml` | — |
+| `nebula` | `nebula-operator/nebula-cluster` | `helm/values/nebula-cluster.yaml` | — |
+| `git-http-server` | `helm/charts/git-http-server` | `helm/values/git-http-server.yaml` | — |
+| `opik` | `opik/opik` | `helm/values/opik.yaml` | — |
 
 Validate NebulaGraph values before install:
 
@@ -25,6 +26,12 @@ helm repo add nebula-operator https://vesoft-inc.github.io/nebula-operator/chart
 helm template nebula nebula-operator/nebula-cluster \
   --version 1.8.0 -f helm/values/nebula-cluster.yaml \
   --set nebula.storageClassName=local-path
+```
+
+Validate Qdrant values before install:
+
+```bash
+./scripts/test-qdrant-config.sh
 ```
 
 ## Guidelines

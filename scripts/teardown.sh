@@ -81,6 +81,8 @@ if [ "$HAS_HELM" = true ]; then
     helm uninstall nebula --namespace nebula || true
     log_info "Uninstalling NebulaGraph Operator Helm release..."
     helm uninstall nebula-operator --namespace nebula-operator-system || true
+    log_info "Uninstalling Qdrant Helm release..."
+    helm uninstall qdrant --namespace qdrant || true
     log_info "Uninstalling PostgreSQL Helm release..."
     helm uninstall postgresql --namespace postgres || true
     log_info "Uninstalling git-http-server Helm release..."

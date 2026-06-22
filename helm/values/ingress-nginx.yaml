@@ -2,9 +2,12 @@
 # External access uses each app's usual port (80, 443, 5173, 5432, …) via hostPort
 # and a small socat sidecar (works when the cluster NodePort range is 30000–32767).
 # PostgreSQL: TCP stream on controller :5432, exposed on host :5432.
+# Qdrant: REST :6333 and gRPC :6334 exposed on the same host ports.
 
 tcp:
   5432: "postgres/postgresql:5432"
+  6333: "qdrant/qdrant:6333"
+  6334: "qdrant/qdrant:6334"
 
 controller:
   # hostPort binds node ports; RollingUpdate cannot schedule a second pod on one node.

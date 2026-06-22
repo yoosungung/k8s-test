@@ -35,6 +35,12 @@ INGRESS_RELEASE="ingress-nginx"
 INGRESS_HTTP_NODEPORT="80"
 INGRESS_HTTPS_NODEPORT="443"
 POSTGRES_TCP_NODEPORT="5432"
+QDRANT_NAMESPACE="qdrant"
+QDRANT_RELEASE="qdrant"
+QDRANT_REST_NODEPORT="6333"
+QDRANT_GRPC_NODEPORT="6334"
+QDRANT_CHART_VERSION="${QDRANT_CHART_VERSION:-}"
+QDRANT_API_KEY="${QDRANT_API_KEY:-test-qdrant-api-key}"
 OPIK_HTTP_PORT="5173"
 SGLANG_HTTP_PORT="30000"
 HERMES_DASHBOARD_PORT="9119"
@@ -100,6 +106,8 @@ log_ingress_routes() {
     log_info "  SGLang OpenAI:     http://sglang.${K8S_TEST_DOMAIN_SUFFIX}:${SGLANG_HTTP_PORT}/v1/"
     log_info "  Git HTTP:          http://git.${K8S_TEST_DOMAIN_SUFFIX}:${INGRESS_HTTP_NODEPORT}/git/<repo>.git"
     log_info "  PostgreSQL (TCP):  psql -h <NODE_IP> -p ${POSTGRES_TCP_NODEPORT} -U hermes -d hermesdb"
+    log_info "  Qdrant REST:       curl -H 'api-key: <key>' http://<NODE_IP>:${QDRANT_REST_NODEPORT}/collections"
+    log_info "  Qdrant gRPC:       <NODE_IP>:${QDRANT_GRPC_NODEPORT}"
 }
 
 deploy_opik() {
@@ -201,7 +209,7 @@ deploy_ingress_nginx() {
         --selector=app.kubernetes.io/component=controller \
         --timeout=300s
 
-    log_info "External ports: Git/HTTP ${INGRESS_HTTP_NODEPORT}, HTTPS ${INGRESS_HTTPS_NODEPORT}, Opik ${OPIK_HTTP_PORT}, Hermes ${HERMES_DASHBOARD_PORT}, API ${HERMES_API_PORT}, SGLang ${SGLANG_HTTP_PORT}, Postgres ${POSTGRES_TCP_NODEPORT}"
+    log_info "External ports: Git/HTTP ${INGRESS_HTTP_NODEPORT}, HTTPS ${INGRESS_HTTPS_NODEPORT}, Opik ${OPIK_HTTP_PORT}, Hermes ${HERMES_DASHBOARD_PORT}, API ${HERMES_API_PORT}, SGLang ${SGLANG_HTTP_PORT}, Postgres ${POSTGRES_TCP_NODEPORT}, Qdrant REST ${QDRANT_REST_NODEPORT}, Qdrant gRPC ${QDRANT_GRPC_NODEPORT}"
     log_info "Shared Ingress HTTP:  http://<NODE_IP>:${INGRESS_HTTP_NODEPORT}/ (Git: git.${K8S_TEST_DOMAIN_SUFFIX})"
     log_info "Shared Ingress HTTPS: https://<NODE_IP>:${INGRESS_HTTPS_NODEPORT}/"
 }
@@ -223,6 +231,31 @@ ensure_git_http_auth_secret() {
         --namespace "${GIT_HTTP_NAMESPACE}" \
         --from-literal=htpasswd="${user}:${hash}" \
         --dry-run=client -o yaml | kubectl apply -f -
+}
+
+deploy_qdrant() {
+    log_info "Ensuring Qdrant Helm repo is registered..."
+    helm repo add qdrant https://qdrant.github.io/qdrant-helm 2>/dev/null || true
+    helm repo update qdrant
+
+    local chart_version_args=()
+    if [[ -n "${QDRANT_CHART_VERSION}" ]]; then
+        chart_version_args=(--version "${QDRANT_CHART_VERSION}")
+    fi
+
+    log_info "Installing/upgrading Qdrant in namespace '${QDRANT_NAMESPACE}'..."
+    helm upgrade --install "${QDRANT_RELEASE}" qdrant/qdrant \
+        --namespace "${QDRANT_NAMESPACE}" \
+        --create-namespace \
+        -f "${ROOT_DIR}/helm/values/qdrant.yaml" \
+        --set "apiKey=${QDRANT_API_KEY}" \
+        "${chart_version_args[@]}" \
+        --wait \
+        --timeout 10m
+
+    log_info "Qdrant REST in-cluster: ${QDRANT_RELEASE}.${QDRANT_NAMESPACE}.svc.cluster.local:${QDRANT_REST_NODEPORT}"
+    log_info "Qdrant gRPC in-cluster: ${QDRANT_RELEASE}.${QDRANT_NAMESPACE}.svc.cluster.local:${QDRANT_GRPC_NODEPORT}"
+    log_info "Qdrant REST external:   http://<NODE_IP>:${QDRANT_REST_NODEPORT}/ (api-key header required)"
 }
 
 deploy_git_http_server() {
@@ -338,6 +371,8 @@ if [ "$HAS_HELM" = true ]; then
         -f "${ROOT_DIR}/helm/values/postgresql.yaml"
 
     ensure_pgvector_extension
+
+    deploy_qdrant
 
     deploy_nebula
 
