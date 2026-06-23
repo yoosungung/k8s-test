@@ -65,6 +65,8 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | `ImagePullBackOff` on SGLang | Registry rate limit or concurrent pulls | Scale deployment to 0, pre-pull on node with `k3s ctr images pull`, scale back |
 | NebulaGraph PVC `Pending` / `nc` not `READY` | `local-path` WaitForFirstConsumer; pod not scheduled (often disk-pressure taint) | `kubectl get pods,pvc -n nebula`; fix node pressure; see README → NebulaGraph |
 | Qdrant PVC `Pending` / `qdrant-0` not `Running` | `local-path` WaitForFirstConsumer; pod not scheduled (often disk-pressure taint) | `kubectl get pods,pvc -n qdrant`; fix node pressure; see README → Qdrant |
+| BGE-M3 TEI `connection refused` on `/health` | First boot model download (~1.1 GB) or CPU overload on bulk embed | `kubectl logs -n llm-serving deploy/bge-m3-tei`; `./scripts/verify-bge-m3-tei.sh`; see README → BGE-M3 TEI |
+| `404` on `qdrant.k8s-test` / `nebula-studio.k8s-test` | Ingress route or socat port not applied; wrong URL port | Use app port (`:6333`, `:7001`); apply `manifests/apps/ingress-routes.yaml`; upgrade ingress-nginx; see README → Qdrant / NebulaGraph Studio |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
 
 Before destructive cluster-wide cleanup (`--field-selector`, force-delete all namespaces), prefer **targeted** pod deletes in the affected namespace only.

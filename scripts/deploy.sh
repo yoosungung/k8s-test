@@ -43,6 +43,8 @@ QDRANT_CHART_VERSION="${QDRANT_CHART_VERSION:-}"
 QDRANT_API_KEY="${QDRANT_API_KEY:-test-qdrant-api-key}"
 OPIK_HTTP_PORT="5173"
 SGLANG_HTTP_PORT="30000"
+BGE_M3_TEI_HTTP_PORT="8080"
+NEBULA_STUDIO_HTTP_PORT="7001"
 HERMES_DASHBOARD_PORT="9119"
 HERMES_API_PORT="8642"
 
@@ -99,14 +101,16 @@ generate_hermes_api_server_key() {
 
 log_ingress_routes() {
     log_info "External access (*.${K8S_TEST_DOMAIN_SUFFIX} — each app uses its service port); add to /etc/hosts:"
-    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
+    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} embeddings.${K8S_TEST_DOMAIN_SUFFIX} qdrant.${K8S_TEST_DOMAIN_SUFFIX} nebula-studio.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
     log_info "  Opik UI:           http://opik.${K8S_TEST_DOMAIN_SUFFIX}:${OPIK_HTTP_PORT}/"
     log_info "  Hermes dashboard:  http://hermes.${K8S_TEST_DOMAIN_SUFFIX}:${HERMES_DASHBOARD_PORT}/"
     log_info "  Hermes API:        http://hermes-api.${K8S_TEST_DOMAIN_SUFFIX}:${HERMES_API_PORT}/"
     log_info "  SGLang OpenAI:     http://sglang.${K8S_TEST_DOMAIN_SUFFIX}:${SGLANG_HTTP_PORT}/v1/"
+    log_info "  BGE-M3 TEI:        http://embeddings.${K8S_TEST_DOMAIN_SUFFIX}:${BGE_M3_TEI_HTTP_PORT}/v1/embeddings"
+    log_info "  Qdrant REST/UI:    http://qdrant.${K8S_TEST_DOMAIN_SUFFIX}:${QDRANT_REST_NODEPORT}/ (dashboard: /dashboard)"
+    log_info "  NebulaGraph Studio: http://nebula-studio.${K8S_TEST_DOMAIN_SUFFIX}:${NEBULA_STUDIO_HTTP_PORT}/"
     log_info "  Git HTTP:          http://git.${K8S_TEST_DOMAIN_SUFFIX}:${INGRESS_HTTP_NODEPORT}/git/<repo>.git"
     log_info "  PostgreSQL (TCP):  psql -h <NODE_IP> -p ${POSTGRES_TCP_NODEPORT} -U hermes -d hermesdb"
-    log_info "  Qdrant REST:       curl -H 'api-key: <key>' http://<NODE_IP>:${QDRANT_REST_NODEPORT}/collections"
     log_info "  Qdrant gRPC:       <NODE_IP>:${QDRANT_GRPC_NODEPORT}"
 }
 
@@ -179,6 +183,7 @@ deploy_nebula() {
         -n "${NEBULA_CLUSTER_NAMESPACE}" --timeout=300s
 
     log_info "NebulaGraph graphd in-cluster: nebula-graphd-svc.${NEBULA_CLUSTER_NAMESPACE}.svc.cluster.local:9669"
+    log_info "NebulaGraph Studio external: http://nebula-studio.${K8S_TEST_DOMAIN_SUFFIX}:${NEBULA_STUDIO_HTTP_PORT}/"
     log_info "NebulaGraph graphd external: kubectl get svc -n ${NEBULA_CLUSTER_NAMESPACE} nebula-graphd-svc (NodePort)"
 }
 
@@ -209,7 +214,7 @@ deploy_ingress_nginx() {
         --selector=app.kubernetes.io/component=controller \
         --timeout=300s
 
-    log_info "External ports: Git/HTTP ${INGRESS_HTTP_NODEPORT}, HTTPS ${INGRESS_HTTPS_NODEPORT}, Opik ${OPIK_HTTP_PORT}, Hermes ${HERMES_DASHBOARD_PORT}, API ${HERMES_API_PORT}, SGLang ${SGLANG_HTTP_PORT}, Postgres ${POSTGRES_TCP_NODEPORT}, Qdrant REST ${QDRANT_REST_NODEPORT}, Qdrant gRPC ${QDRANT_GRPC_NODEPORT}"
+    log_info "External ports: Git/HTTP ${INGRESS_HTTP_NODEPORT}, HTTPS ${INGRESS_HTTPS_NODEPORT}, Opik ${OPIK_HTTP_PORT}, Hermes ${HERMES_DASHBOARD_PORT}, API ${HERMES_API_PORT}, SGLang ${SGLANG_HTTP_PORT}, BGE-M3 TEI ${BGE_M3_TEI_HTTP_PORT}, Qdrant REST ${QDRANT_REST_NODEPORT}, Qdrant gRPC ${QDRANT_GRPC_NODEPORT}, Nebula Studio ${NEBULA_STUDIO_HTTP_PORT}"
     log_info "Shared Ingress HTTP:  http://<NODE_IP>:${INGRESS_HTTP_NODEPORT}/ (Git: git.${K8S_TEST_DOMAIN_SUFFIX})"
     log_info "Shared Ingress HTTPS: https://<NODE_IP>:${INGRESS_HTTPS_NODEPORT}/"
 }
@@ -255,7 +260,7 @@ deploy_qdrant() {
 
     log_info "Qdrant REST in-cluster: ${QDRANT_RELEASE}.${QDRANT_NAMESPACE}.svc.cluster.local:${QDRANT_REST_NODEPORT}"
     log_info "Qdrant gRPC in-cluster: ${QDRANT_RELEASE}.${QDRANT_NAMESPACE}.svc.cluster.local:${QDRANT_GRPC_NODEPORT}"
-    log_info "Qdrant REST external:   http://<NODE_IP>:${QDRANT_REST_NODEPORT}/ (api-key header required)"
+    log_info "Qdrant REST external:   http://qdrant.${K8S_TEST_DOMAIN_SUFFIX}:${QDRANT_REST_NODEPORT}/ (api-key header; UI: /dashboard)"
 }
 
 deploy_git_http_server() {

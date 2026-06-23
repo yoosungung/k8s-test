@@ -1,0 +1,106 @@
+# BAAI/bge-m3 dense embeddings via Hugging Face Text Embeddings Inference (CPU).
+# Tuned for RAG chunks ≤1k tokens; does not expose sparse/ColBERT outputs (TEI dense API only).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bge-m3-tei
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: bge-m3-tei
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bge-m3-tei
+  template:
+    metadata:
+      labels:
+        app: bge-m3-tei
+    spec:
+      containers:
+      - name: tei
+        image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+        imagePullPolicy: IfNotPresent
+        args:
+        - --model-id
+        - BAAI/bge-m3
+        - --served-model-name
+        - BAAI/bge-m3
+        - --hostname
+        - 0.0.0.0
+        - --port
+        - "80"
+        # Align batch token budget with ≤1k-token RAG chunks (reduces CPU RAM spikes).
+        - --max-batch-tokens
+        - "1024"
+        - --max-client-batch-size
+        - "16"
+        - --auto-truncate
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token-secret
+              key: token
+              optional: true
+        - name: HUGGINGFACE_HUB_CACHE
+          value: /data
+        # Avoid saturating all host CPUs during embedding bursts.
+        - name: TOKENIZATION_WORKERS
+          value: "4"
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 8Gi
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 80
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 6
+        volumeMounts:
+        - name: model-cache
+          mountPath: /data
+      volumes:
+      - name: model-cache
+        hostPath:
+          path: /Users/suyoo/hf_cache
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bge-m3-tei
+  namespace: llm-serving
+  labels:
+    app.kubernetes.io/name: bge-m3-tei
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 80
+  selector:
+    app: bge-m3-tei

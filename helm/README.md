@@ -11,7 +11,7 @@ This directory is dedicated to Helm charts and release configuration values.
 
 | Release | Chart | Values file | Verify script |
 | -------- | ----- | ------------- | ------------- |
-| `ingress-nginx` | `ingress-nginx/ingress-nginx` | `helm/values/ingress-nginx.yaml` | — |
+| `ingress-nginx` | `ingress-nginx/ingress-nginx` | `helm/values/ingress-nginx.yaml` | — (hostPorts: 80, 443, 5173, 9119, 8642, 30000, **8080**, **6333**, **7001**; TCP 5432, 6334) |
 | `postgresql` | `bitnami/postgresql` | `helm/values/postgresql.yaml` | — |
 | `qdrant` | `qdrant/qdrant` | `helm/values/qdrant.yaml` | `scripts/test-qdrant-config.sh`, `scripts/verify-qdrant.sh` |
 | `nebula-operator` | `nebula-operator/nebula-operator` | `helm/values/nebula-operator.yaml` | — |
@@ -32,6 +32,12 @@ Validate Qdrant values before install:
 
 ```bash
 ./scripts/test-qdrant-config.sh
+```
+
+Validate BGE-M3 TEI manifest before apply (raw Deployment, not Helm):
+
+```bash
+./scripts/test-bge-m3-tei-config.sh
 ```
 
 ## Guidelines

@@ -86,7 +86,7 @@ To deploy all configurations, infrastructure elements, and applications in the c
 1. **Namespaces & infra** — `manifests/infra/` (including `nebula`, `nebula-operator-system`, postgres, git, …)
 2. **Helm releases** — ingress-nginx → PostgreSQL (+ pgvector) → **Qdrant** → **NebulaGraph Operator + cluster** → git-http-server → Opik
 3. **Secrets** — Hugging Face, Hermes gateway/auth
-4. **Apps** — `manifests/apps/` (Hermes, SGLang, ingress routes, …)
+4. **Apps** — `manifests/apps/` (Hermes, SGLang, **BGE-M3 TEI**, **NebulaGraph Studio**, **ingress routes** for Qdrant/Studio/…)
 
 NebulaGraph-only reinstall (after namespaces exist):
 
@@ -103,10 +103,35 @@ helm repo add qdrant https://qdrant.github.io/qdrant-helm
 helm upgrade --install qdrant qdrant/qdrant \
   -n qdrant -f helm/values/qdrant.yaml \
   --set "apiKey=${QDRANT_API_KEY:-test-qdrant-api-key}" --wait --timeout 10m
+kubectl apply -f manifests/apps/ingress-routes.yaml   # qdrant.k8s-test route
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  -n ingress-nginx -f helm/values/ingress-nginx.yaml --wait --timeout 15m
 ./scripts/verify-qdrant.sh
 ```
 
-See [Qdrant](#qdrant-vector-database) for full connection and troubleshooting docs.
+NebulaGraph Studio-only apply (after `nebula` namespace and graphd are ready):
+
+```bash
+./scripts/test-nebula-studio-config.sh
+kubectl apply -f manifests/apps/nebula-studio.yaml
+kubectl apply -f manifests/apps/ingress-routes.yaml   # nebula-studio.k8s-test route
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  -n ingress-nginx -f helm/values/ingress-nginx.yaml --wait --timeout 15m
+./scripts/verify-nebula-studio.sh
+```
+
+See [NebulaGraph](#nebulagraph) → NebulaGraph Studio for graphd connection settings.
+
+BGE-M3 TEI-only apply (after `llm-serving` namespace and `hf-token-secret` exist):
+
+```bash
+./scripts/test-bge-m3-tei-config.sh
+kubectl apply -f manifests/apps/bge-m3-tei.yaml
+kubectl apply -f manifests/apps/ingress-routes.yaml   # embeddings.k8s-test route
+./scripts/verify-bge-m3-tei.sh
+```
+
+See [BGE-M3 embeddings (CPU TEI)](#bge-m3-embeddings-cpu-tei) for RAG wiring and client examples.
 
 For Hermes agents, you can provide secrets via environment variables (non-interactive):
 
@@ -163,6 +188,38 @@ kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'
 3. Controllers (Deployment/StatefulSet) schedule new pods automatically. Init-heavy pods (Hermes, Opik backend) may take several more minutes.
 
 **Do not** add tolerations for `disk-pressure` unless you intend to schedule onto a still-starved disk.
+
+### BGE-M3 TEI startup slow / OOM / high CPU
+
+**Symptoms**
+
+```text
+Startup probe failed: Get "http://...:80/health": connection refused
+```
+
+Pod stays `0/1` for several minutes on first deploy, or CPU spikes during bulk indexing.
+
+**Cause:** First boot downloads ~1.1 GB model weights into the host `hf_cache` mount. CPU TEI can saturate all cores during large client batches.
+
+**Fix**
+
+```bash
+kubectl logs -n llm-serving deploy/bge-m3-tei --tail=80
+kubectl get pods -n llm-serving -l app=bge-m3-tei
+
+# Wait for model load (startupProbe allows ~10 min)
+kubectl rollout status deploy/bge-m3-tei -n llm-serving --timeout=600s
+./scripts/verify-bge-m3-tei.sh
+```
+
+If clients time out on bulk embeds, lower per-request batch size (≤16 texts) or raise client timeout. Manifest already sets `--max-client-batch-size 16` and `TOKENIZATION_WORKERS=4`.
+
+**External URL not reachable:** ensure `/etc/hosts` includes `embeddings.k8s-test` and ingress-nginx exposes port `8080` ([`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) socat sidecar). Re-upgrade if needed:
+
+```bash
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  -n ingress-nginx -f helm/values/ingress-nginx.yaml --wait --timeout 15m
+```
 
 ### Stale pods after an incident
 
@@ -320,8 +377,10 @@ See [Qdrant](#qdrant-vector-database) for connection, upgrade, and teardown.
 | ingress-nginx | `kubectl get deploy -n ingress-nginx` | Delete unknown pods; helm upgrade if ports stuck |
 | postgresql | `kubectl get sts -n postgres` | Wait for PVC; check evicted pods |
 | SGLang | `2/2` in `llm-serving` | Pre-pull image (above) |
+| BGE-M3 TEI | `1/1` in `llm-serving` | `./scripts/verify-bge-m3-tei.sh`; first start downloads ~1.1 GB model |
 | git-http-server | `1/1` in `git` | Rebuild/import image (above) |
 | NebulaGraph | `kubectl get nc -n nebula nebula` → `READY=True` | Check PVC/Pod Pending; see [NebulaGraph](#nebulagraph) |
+| NebulaGraph Studio | `kubectl get deploy -n nebula nebula-studio` → Ready | `./scripts/verify-nebula-studio.sh`; see [NebulaGraph Studio](#nebulagraph-studio) |
 | Qdrant | `kubectl get pods -n qdrant` → `qdrant-0` Running | `./scripts/verify-qdrant.sh`; check PVC/Pod Pending on disk pressure |
 
 ---
@@ -330,28 +389,32 @@ See [Qdrant](#qdrant-vector-database) for connection, upgrade, and teardown.
 
 Apps use **ClusterIP** Services and reach the LAN via the shared [ingress-nginx](https://kubernetes.github.io/ingress-nginx/) controller. Host-based routing uses **`*.k8s-test`**; the URL **port matches each app’s Service port** (e.g. Opik **5173**, SGLang **30000**, Git **80**). The controller binds those ports on the node with **hostPort** (and a small socat sidecar for extra HTTP/TCP aliases), so you do not use a shared **30080** hop.
 
-Replace `<NODE_IP>` with any cluster node (e.g. `192.168.150.200`). HTTP apps use **`http://<name>.k8s-test:<app-port>/`** (no shared `30080` hop).
+Replace `<NODE_IP>` with any cluster node (e.g. `192.168.150.200`). HTTP apps use **`http://<name>.k8s-test:<app-port>/`** — the **port is required** for most apps (Opik `5173`, Qdrant `6333`, Studio `7001`, …). Port `80` on the node is the shared ingress controller; host-based routes still work on `:80` if the Ingress resource exists, but the convention in this repo is **service port = external port** via the socat sidecar.
 
 Add to `/etc/hosts`:
 
 ```text
-<NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test git.k8s-test
+<NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test embeddings.k8s-test qdrant.k8s-test nebula-studio.k8s-test git.k8s-test
 ```
 
 | Service | Host | External URL | In-cluster |
 | -------- | ------ | ------------ | ---------- |
 | Ingress (HTTP/HTTPS) | — | `http://<NODE_IP>:80` / `https://<NODE_IP>:443` | — |
 | PostgreSQL | — | `psql -h <NODE_IP> -p 5432 …` | `postgresql.postgres.svc.cluster.local:5432` |
-| Qdrant REST | — | `curl -H 'api-key: <key>' http://<NODE_IP>:6333/collections` | `qdrant.qdrant.svc.cluster.local:6333` |
+| Qdrant REST / Web UI | `qdrant.k8s-test` | `http://qdrant.k8s-test:6333/` (UI: `/dashboard`) | `qdrant.qdrant.svc.cluster.local:6333` |
 | Qdrant gRPC | — | `<NODE_IP>:6334` | `qdrant.qdrant.svc.cluster.local:6334` |
 | Opik UI | `opik.k8s-test` | `http://opik.k8s-test:5173/` | `opik-frontend.opik.svc.cluster.local:5173` |
 | Hermes dashboard | `hermes.k8s-test` | `http://hermes.k8s-test:9119/` | `hermes-master.ai-agents.svc.cluster.local:9119` |
 | Hermes API | `hermes-api.k8s-test` | `http://hermes-api.k8s-test:8642/` | `hermes-master.ai-agents.svc.cluster.local:8642` |
-| SGLang OpenAI | `sglang.k8s-test` | `http://sglang.k8s-test:30000/v1/` | `sglang-gemma4-31b.llm-serving.svc.cluster.local:30000` |
+| SGLang OpenAI | `sglang.k8s-test` | `http://sglang.k8s-test:30000/v1/` | `sglang-gemma4-12b.llm-serving.svc.cluster.local:30000` |
+| BGE-M3 TEI | `embeddings.k8s-test` | `http://embeddings.k8s-test:8080/v1/embeddings` | `bge-m3-tei.llm-serving.svc.cluster.local:8080` |
 | Git HTTP | `git.k8s-test` | `http://git.k8s-test:80/git/<repo>.git` | `git-http-server.git.svc.cluster.local/git/…` |
+| NebulaGraph Studio | `nebula-studio.k8s-test` | `http://nebula-studio.k8s-test:7001/` | `nebula-studio.nebula.svc.cluster.local:7001` |
 | NebulaGraph graphd | — | `nebula-console -addr <NODE_IP> -port <NodePort> -u root -p nebula` | `nebula-graphd-svc.nebula.svc.cluster.local:9669` |
 
-Ingress definitions: `[manifests/apps/ingress-routes.yaml](manifests/apps/ingress-routes.yaml)` (Git: `[helm/charts/git-http-server](helm/charts/git-http-server)`). Controller values: `[helm/values/ingress-nginx.yaml](helm/values/ingress-nginx.yaml)`.
+**Ingress routing:** HTTP apps use host `*.k8s-test` rules in [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml). The ingress-nginx controller listens on node `:80`/`:443`; per-app ports (`6333`, `7001`, …) are forwarded to `:80` by the **socat** sidecar in [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml). Qdrant gRPC (`6334`) and PostgreSQL (`5432`) use **TCP stream** passthrough instead of HTTP Ingress.
+
+Ingress definitions: [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml) (Git: [`helm/charts/git-http-server`](helm/charts/git-http-server)). Controller values: [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml).
 
 ```bash
 kubectl get ingress -A
@@ -386,9 +449,223 @@ export OPIK_URL_OVERRIDE="http://opik-frontend.opik.svc.cluster.local:5173/api"
 
 Override the chart image tag with `OPIK_VERSION` (default `latest`), e.g. `OPIK_VERSION=2.0.18 ./scripts/deploy.sh`.
 
+### BGE-M3 embeddings (CPU TEI)
+
+[BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) is served via [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) on **CPU** so both GPUs stay available for SGLang (Gemma 4 12B). TEI exposes OpenAI-compatible `/v1/embeddings` (dense **1024-d** vectors only — no sparse/ColBERT).
+
+```mermaid
+flowchart LR
+  subgraph ingest [Indexing]
+    Docs[Documents / chunks] --> TEI[BGE-M3 TEI CPU]
+    TEI --> Qdrant[(Qdrant)]
+  end
+  subgraph query [RAG query]
+    Q[User question] --> TEI2[BGE-M3 TEI]
+    TEI2 --> Search[Qdrant search]
+    Search --> Ctx[Retrieved context]
+    Ctx --> LLM[SGLang Gemma 4 12B]
+    LLM --> Ans[Answer]
+  end
+```
+
+| Item | Value |
+| -------- | ------ |
+| Namespace | `llm-serving` |
+| Deployment | `bge-m3-tei` (1 replica) |
+| Image | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9` |
+| Model | `BAAI/bge-m3` |
+| Vector size | **1024** (cosine distance in Qdrant) |
+| External host | `embeddings.k8s-test:8080` |
+| In-cluster base URL | `http://bge-m3-tei.llm-serving.svc.cluster.local:8080` |
+| OpenAI path | `/v1/embeddings` |
+| Legacy path | `/embed` (`{"inputs":"..."}`) |
+| GPU | None (`requests`/`limits` are CPU + RAM only) |
+
+**Files:** [`manifests/apps/bge-m3-tei.yaml`](manifests/apps/bge-m3-tei.yaml), [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml), [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) (hostPort `8080`), [`scripts/test-bge-m3-tei-config.sh`](scripts/test-bge-m3-tei-config.sh), [`scripts/verify-bge-m3-tei.sh`](scripts/verify-bge-m3-tei.sh).
+
+#### Why CPU (not shared with SGLang)
+
+| Approach | Pros | Cons |
+| -------- | ---- | ---- |
+| **CPU TEI (current)** | Keeps 2× GPU for Gemma; ~50 ms/query embed | Bulk indexing slower than GPU |
+| GPU TEI on spare GPU | Fast indexing | Requires `replicas: 1` on SGLang or VRAM sharing |
+| Same SGLang process | — | **Not supported** — one model per `sglang serve` |
+
+#### Resource tuning (RAG chunks ≤1k tokens)
+
+| Setting | Value | Why |
+|--------|-------|-----|
+| `--max-batch-tokens 1024` | batch token budget | Matches chunk size; lowers CPU RAM spikes vs default 16384 |
+| `--max-client-batch-size 16` | per-request cap | Avoids CPU timeouts on large client batches |
+| `--auto-truncate` | on | Truncates inputs beyond model max (8192); keep chunks ≤1000 tokens in the pipeline |
+| `TOKENIZATION_WORKERS=4` | CPU cap | Prevents TEI from monopolizing all host cores |
+| Dense only | TEI API | Sparse/ColBERT not exposed; use [FlagEmbedding](https://github.com/FlagOpen/FlagEmbedding) separately if needed |
+| `use_fp16` | N/A on CPU | For a future GPU TEI deployment, add `--dtype float16` |
+
+#### Deploy and verify
+
+```bash
+# Pre-deploy config gate (TDD)
+./scripts/test-bge-m3-tei-config.sh
+
+# Full stack (included in ./scripts/deploy.sh) or TEI only:
+kubectl apply -f manifests/apps/bge-m3-tei.yaml
+
+# Post-deploy verification
+./scripts/verify-bge-m3-tei.sh
+```
+
+#### Connect from your machine (LAN)
+
+Add to `/etc/hosts` (see [External access](#external-access-shared-ingress)):
+
+```text
+<NODE_IP>  embeddings.k8s-test
+```
+
+```bash
+# OpenAI-compatible
+curl -s http://embeddings.k8s-test:8080/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"BAAI/bge-m3","input":"hello world"}'
+
+# Batch inputs
+curl -s http://embeddings.k8s-test:8080/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"BAAI/bge-m3","input":["chunk one","chunk two"]}'
+
+# Health
+curl -s http://embeddings.k8s-test:8080/health
+```
+
+#### Connect from inside the cluster
+
+**Pod env for RAG workloads** (e.g. in `ai-agents`):
+
+```yaml
+env:
+  - name: EMBEDDING_BASE_URL
+    value: "http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1"
+  - name: EMBEDDING_MODEL
+    value: "BAAI/bge-m3"
+  - name: QDRANT_URL
+    value: "http://qdrant.qdrant.svc.cluster.local:6333"
+  - name: QDRANT_API_KEY
+    value: "test-qdrant-api-key"
+  - name: OPENAI_API_BASE
+    value: "http://sglang-gemma4-12b.llm-serving.svc.cluster.local:30000/v1"
+```
+
+**OpenAI Python SDK:**
+
+```python
+from openai import OpenAI
+
+embed_client = OpenAI(
+    base_url="http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1",
+    api_key="not-needed",  # TEI has no API key in this test setup
+)
+resp = embed_client.embeddings.create(
+    model="BAAI/bge-m3",
+    input="hello world",
+)
+vector = resp.data[0].embedding  # len == 1024
+```
+
+**LangChain:**
+
+```python
+from langchain_openai import OpenAIEmbeddings
+
+embeddings = OpenAIEmbeddings(
+    model="BAAI/bge-m3",
+    openai_api_base="http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1",
+    openai_api_key="not-needed",
+    check_embedding_ctx_length=False,
+)
+vec = embeddings.embed_query("hello world")
+```
+
+#### RAG example: TEI → Qdrant → SGLang
+
+Create a Qdrant collection with **1024** dimensions (not 384):
+
+```python
+from openai import OpenAI
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, PointStruct, VectorParams
+
+QDRANT_URL = "http://qdrant.qdrant.svc.cluster.local:6333"
+TEI_URL = "http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1"
+SGLANG_URL = "http://sglang-gemma4-12b.llm-serving.svc.cluster.local:30000/v1"
+COLLECTION = "rag-demo"
+
+qdrant = QdrantClient(url=QDRANT_URL, api_key="test-qdrant-api-key")
+tei = OpenAI(base_url=TEI_URL, api_key="not-needed")
+llm = OpenAI(base_url=SGLANG_URL, api_key="not-needed")
+
+qdrant.recreate_collection(
+    collection_name=COLLECTION,
+    vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+)
+
+chunks = ["Kubernetes schedules pods onto nodes.", "Qdrant stores dense vectors for search."]
+for i, text in enumerate(chunks):
+    emb = tei.embeddings.create(model="BAAI/bge-m3", input=text).data[0].embedding
+    qdrant.upsert(collection_name=COLLECTION, points=[PointStruct(id=i, vector=emb, payload={"text": text})])
+
+question = "How does scheduling work?"
+q_vec = tei.embeddings.create(model="BAAI/bge-m3", input=question).data[0].embedding
+hits = qdrant.search(collection_name=COLLECTION, query_vector=q_vec, limit=2)
+context = "\n".join(h.payload["text"] for h in hits)
+
+answer = llm.chat.completions.create(
+    model="nmilosev/gemma-4-12B-it-quantized.w4a16",
+    messages=[
+        {"role": "system", "content": "Answer using the context only."},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
+    ],
+)
+print(answer.choices[0].message.content)
+```
+
+Off-cluster: replace URLs with `http://embeddings.k8s-test:8080/v1`, `http://qdrant.k8s-test:6333`, `http://sglang.k8s-test:30000/v1`.
+
+#### Port-forward (no ingress)
+
+```bash
+kubectl port-forward -n llm-serving svc/bge-m3-tei 8080:8080
+curl -s http://127.0.0.1:8080/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"BAAI/bge-m3","input":"test"}'
+```
+
+#### Health checks
+
+```bash
+kubectl get deploy,pods,svc,ingress -n llm-serving -l app.kubernetes.io/name=bge-m3-tei
+kubectl logs -n llm-serving deploy/bge-m3-tei --tail=50
+./scripts/verify-bge-m3-tei.sh
+```
+
+#### Environment variables (`verify-bge-m3-tei.sh`)
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `BGE_M3_TEI_NAMESPACE` | `llm-serving` | Target namespace |
+| `BGE_M3_TEI_DEPLOY` | `bge-m3-tei` | Deployment name |
+| `BGE_M3_TEI_PORT` | `8080` | Service port |
+| `BGE_M3_TEI_MODEL` | `BAAI/bge-m3` | Model id for probe |
+| `BGE_M3_EXPECTED_DIM` | `1024` | Expected embedding size |
+| `BGE_M3_TEI_INGRESS_HOST` | `embeddings.k8s-test` | Host header for external probe |
+
+Recovery runbook: [BGE-M3 TEI startup slow / OOM / high CPU](#bge-m3-tei-startup-slow--oom--high-cpu).
+
 ### Qdrant (vector database)
 
 [Qdrant](https://qdrant.tech/) is a vector similarity search engine used for RAG, semantic search, and embedding storage. It is installed via the [official Helm chart](https://github.com/qdrant/qdrant-helm) when you run `./scripts/deploy.sh`.
+
+When pairing with [BGE-M3 TEI](#bge-m3-embeddings-cpu-tei), create collections with **`size=1024`** and `Distance.COSINE`.
 
 | Item | Value |
 | -------- | ------ |
@@ -399,11 +676,12 @@ Override the chart image tag with `OPIK_VERSION` (default `latest`), e.g. `OPIK_
 | StorageClass | `local-path` (8 GiB PVC) |
 | REST port | `6333` (HTTP API + Web UI) |
 | gRPC port | `6334` |
-| External access | ingress-nginx TCP stream on host `:6333` / `:6334` |
+| External access (REST/UI) | Ingress host `qdrant.k8s-test` on port `6333` (socat → nginx) |
+| External access (gRPC) | ingress-nginx TCP stream on host `:6334` |
 | API key (test default) | `test-qdrant-api-key` |
 | Chart version | latest from repo |
 
-**Files:** [`helm/values/qdrant.yaml`](helm/values/qdrant.yaml), [`manifests/infra/qdrant-namespace.yaml`](manifests/infra/qdrant-namespace.yaml), [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) (TCP ports), [`scripts/test-qdrant-config.sh`](scripts/test-qdrant-config.sh), [`scripts/verify-qdrant.sh`](scripts/verify-qdrant.sh).
+**Files:** [`helm/values/qdrant.yaml`](helm/values/qdrant.yaml), [`manifests/infra/qdrant-namespace.yaml`](manifests/infra/qdrant-namespace.yaml), [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml) (host `qdrant.k8s-test`), [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) (socat `6333`, TCP `6334`), [`scripts/test-qdrant-config.sh`](scripts/test-qdrant-config.sh), [`scripts/verify-qdrant.sh`](scripts/verify-qdrant.sh).
 
 Single-node test layout: **1 replica**, Raft cluster mode **disabled** (`config.cluster.enabled: false`). Suitable for local development and integration tests; not HA.
 
@@ -413,6 +691,7 @@ Single-node test layout: **1 replica**, Raft cluster mode **disabled** (`config.
 | -------- | ------- | ------- |
 | `QDRANT_API_KEY` | `test-qdrant-api-key` | REST/gRPC authentication key |
 | `QDRANT_CHART_VERSION` | *(empty = latest)* | Pin Helm chart version |
+| `QDRANT_INGRESS_HOST` | `qdrant.k8s-test` | Host header for external ingress probe |
 
 ```bash
 QDRANT_API_KEY="$(openssl rand -hex 32)" ./scripts/deploy.sh --force
@@ -425,9 +704,21 @@ QDRANT_API_KEY="$(openssl rand -hex 32)" ./scripts/deploy.sh --force
 curl -H "api-key: test-qdrant-api-key" \
   http://qdrant.qdrant.svc.cluster.local:6333/collections
 
-# Web UI (browser from a machine that can reach the cluster)
-# http://qdrant.qdrant.svc.cluster.local:6333/dashboard
+# Web UI — open in browser (from a machine with /etc/hosts → qdrant.k8s-test)
+open "http://qdrant.k8s-test:6333/dashboard"
 ```
+
+#### Web UI and API key
+
+The built-in [Qdrant Web UI](https://qdrant.tech/documentation/web-ui/) is served at **`/dashboard`** on the REST port. When `apiKey` is set (default in this environment), the UI shows **Set API Key** on first load — enter the same key as REST clients:
+
+| Setting | Value |
+| ------- | ----- |
+| Default API key | `test-qdrant-api-key` |
+| Override at deploy | `QDRANT_API_KEY=… ./scripts/deploy.sh --force` |
+| Check deployed key | `helm get values qdrant -n qdrant \| grep -i apiKey` |
+
+The key is stored in the browser session only; there is no separate UI password.
 
 **Pod env for workloads** (e.g. RAG services in `ai-agents`):
 
@@ -444,15 +735,15 @@ env:
 
 #### Connect from your machine (LAN)
 
-Replace `<NODE_IP>` with the cluster node (e.g. `192.168.150.200`). Requires ingress-nginx upgrade with TCP ports in [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml).
+Add `qdrant.k8s-test` to `/etc/hosts` (see [External access](#external-access-shared-ingress)). Requires ingress-nginx with socat `6333` and Ingress route in [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml).
 
 ```bash
-# REST
+# REST (api-key required when auth is enabled)
 curl -H "api-key: test-qdrant-api-key" \
-  http://<NODE_IP>:6333/collections
+  http://qdrant.k8s-test:6333/collections
 
 # Web UI
-open "http://<NODE_IP>:6333/dashboard"
+open "http://qdrant.k8s-test:6333/dashboard"
 ```
 
 **Python client:**
@@ -466,7 +757,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
 client = QdrantClient(
-    url="http://<NODE_IP>:6333",
+    url="http://qdrant.k8s-test:6333",
     api_key="test-qdrant-api-key",
 )
 
@@ -519,7 +810,8 @@ chmod +x scripts/test-qdrant-config.sh scripts/verify-qdrant.sh
 ```bash
 kubectl get sts,pods,pvc,svc -n qdrant
 kubectl logs -n qdrant qdrant-0 --tail=50
-curl -s -H "api-key: test-qdrant-api-key" http://<NODE_IP>:6333/ | head
+curl -s -H "api-key: test-qdrant-api-key" -H "Host: qdrant.k8s-test" \
+  "http://<NODE_IP>:6333/collections"
 ```
 
 #### Qdrant-only reinstall
@@ -531,7 +823,8 @@ helm upgrade --install qdrant qdrant/qdrant \
   --set "apiKey=${QDRANT_API_KEY:-test-qdrant-api-key}" \
   --wait --timeout 10m
 
-# Re-apply ingress TCP if external access is missing
+# Re-apply ingress if external access is missing
+kubectl apply -f manifests/apps/ingress-routes.yaml
 helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   -n ingress-nginx -f helm/values/ingress-nginx.yaml --wait --timeout 15m
 
@@ -565,8 +858,9 @@ kubectl delete pvc -n qdrant -l app.kubernetes.io/instance=qdrant
 | -------- | ------------- | ------ |
 | `qdrant-0` Pending | Node disk-pressure taint | See [Node disk pressure](#node-disk-pressure-failedscheduling--untolerated-taint) |
 | PVC Pending | `WaitForFirstConsumer`; pod not scheduled | `kubectl describe pod -n qdrant qdrant-0` |
-| `401` / `403` on REST | Wrong or missing `api-key` header | Match `QDRANT_API_KEY` / [`helm/values/qdrant.yaml`](helm/values/qdrant.yaml) |
-| External `:6333` unreachable | ingress-nginx TCP not applied | `helm upgrade` ingress-nginx with [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) |
+| `401` / `403` on REST or UI | Wrong or missing `api-key` | Default: `test-qdrant-api-key`; see [Web UI and API key](#web-ui-and-api-key) |
+| `404` on `qdrant.k8s-test` | Ingress route or socat `6333` not applied | `kubectl get ingress -n qdrant`; apply [`ingress-routes.yaml`](manifests/apps/ingress-routes.yaml); upgrade ingress-nginx |
+| External `:6333` unreachable | ingress-nginx socat/Ingress not applied | `helm upgrade` ingress-nginx with [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml); `kubectl apply -f manifests/apps/ingress-routes.yaml` |
 | Data lost after reinstall | PVC deleted | Back up snapshots before teardown; see [Qdrant snapshots](https://qdrant.tech/documentation/concepts/snapshots/) |
 
 **PVC stays Pending:** With `local-path` and `WaitForFirstConsumer`, PVCs bind only after `qdrant-0` is scheduled. If the pod is Pending, check node taints (`kubectl describe node didim-gpu | grep -E 'Taints|DiskPressure'`).
@@ -585,10 +879,48 @@ kubectl delete pvc -n qdrant -l app.kubernetes.io/instance=qdrant
 | Default credentials | user `root`, password `nebula` |
 | Graph port (Thrift) | `9669` (Service); NodePort assigned dynamically (e.g. `32080`) |
 | Graph HTTP (status) | `19669` (Service); NodePort assigned dynamically |
+| NebulaGraph Studio | Ingress `nebula-studio.k8s-test:7001` (v3.8.0 web GUI) |
 
 Single-node test layout: graphd/metad/storaged each **1 replica**, PVCs on `local-path` (~8–9 GiB total). Namespaces: [`manifests/infra/nebula-namespace.yaml`](manifests/infra/nebula-namespace.yaml), [`manifests/infra/nebula-operator-namespace.yaml`](manifests/infra/nebula-operator-namespace.yaml).
 
-**Connect from inside the cluster:**
+#### NebulaGraph Studio
+
+[NebulaGraph Studio](https://docs.nebula-graph.io/3.8.0/nebula-studio/) is Vesoft’s official web GUI for schema design, data import, and nGQL. Deployed from [`manifests/apps/nebula-studio.yaml`](manifests/apps/nebula-studio.yaml) (image `vesoft/nebula-graph-studio:v3.8.0`, sqlite3 metadata on PVC).
+
+| Item | Value |
+| -------- | ------ |
+| Namespace | `nebula` |
+| Ingress host | `nebula-studio.k8s-test` |
+| External URL | `http://nebula-studio.k8s-test:7001/` |
+| In-cluster URL | `http://nebula-studio.nebula.svc.cluster.local:7001/` |
+| Service port | `7001` |
+
+Add `nebula-studio.k8s-test` to `/etc/hosts` (see [External access](#external-access-shared-ingress)). **Use port `7001`** — other apps in this cluster follow the same pattern (`opik.k8s-test:5173`, `qdrant.k8s-test:6333`, …). Port `80` without the app port may return nginx `404` if the Ingress rule is missing.
+
+**Connect Studio to graphd** (Config Server screen):
+
+| Field | Value |
+| ----- | ----- |
+| Host | `nebula-graphd-svc.nebula.svc.cluster.local` (browser on LAN: `<NODE_IP>`) |
+| Port | `9669` (LAN: graphd NodePort, e.g. `32080` — `kubectl get svc -n nebula nebula-graphd-svc`) |
+| User / password | `root` / `nebula` |
+
+```bash
+./scripts/test-nebula-studio-config.sh
+./scripts/verify-nebula-studio.sh
+kubectl get deploy,ingress -n nebula nebula-studio
+```
+
+| Symptom | Likely cause | Action |
+| -------- | ------------- | ------ |
+| `404` on `http://nebula-studio.k8s-test` | Wrong port or Ingress not applied | Use **`:7001`**; `kubectl apply -f manifests/apps/nebula-studio.yaml -f manifests/apps/ingress-routes.yaml` |
+| `404` on `:7001` | socat `7001` missing on ingress-nginx | `helm upgrade` with [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) |
+| Studio pod Pending | PVC / disk pressure | `kubectl describe pod -n nebula -l app=nebula-studio` |
+| Cannot connect to graphd in UI | Wrong host/port from browser | Use node IP + graphd **NodePort**, not in-cluster DNS, when browsing from your laptop |
+
+**Files:** [`manifests/apps/nebula-studio.yaml`](manifests/apps/nebula-studio.yaml), [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml), [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml) (socat `7001`), [`scripts/test-nebula-studio-config.sh`](scripts/test-nebula-studio-config.sh), [`scripts/verify-nebula-studio.sh`](scripts/verify-nebula-studio.sh).
+
+**Connect from inside the cluster (CLI):**
 
 ```bash
 kubectl run nebula-console --rm -it --restart=Never \
@@ -810,5 +1142,15 @@ chmod +x scripts/verify-sglang.sh
 
 ### 3. [Scripts (`/scripts`)](file:///Users/suyoo/Documents/works/test_infra/scripts/)
 
-- Contains helper and driver scripts. Always run from the root directory or ensure path-resolving logic within the scripts.
+| Script | Purpose |
+| ------ | ------- |
+| `deploy.sh` | Full environment deploy |
+| `teardown.sh` | Remove test resources |
+| `test-bge-m3-tei-config.sh` | Pre-deploy TEI manifest validation |
+| `verify-bge-m3-tei.sh` | Post-deploy BGE-M3 TEI checks |
+| `test-qdrant-config.sh` | Pre-deploy Qdrant Helm validation |
+| `verify-qdrant.sh` | Post-deploy Qdrant checks |
+| `verify-sglang.sh` | Post-deploy SGLang checks |
+
+Always run from the repository root or rely on path-resolving logic inside each script.
 

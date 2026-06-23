@@ -1,0 +1,137 @@
+# NebulaGraph Studio — official web GUI for schema, import, and nGQL (v3.8.0).
+# Connect in the UI to graphd: nebula-graphd-svc.nebula.svc.cluster.local:9669 (user root / password nebula).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nebula-studio-config
+  namespace: nebula
+  labels:
+    app.kubernetes.io/name: nebula-studio
+data:
+  studio-api.yaml: |
+    Name: studio-api
+    Host: 0.0.0.0
+    Port: 7001
+    MaxBytes: 1073741824
+    Timeout: 60000
+    Log:
+      Mode: file
+      Level: error
+      KeepDays: 7
+    Debug:
+      Enable: false
+    Auth:
+      TokenName: "studio_token"
+      AccessSecret: "login_secret"
+      AccessExpire: 259200
+    File:
+      UploadDir: "/data/upload/"
+      TasksDir: "/data/tasks"
+    DB:
+      LogLevel: 4
+      IgnoreRecordNotFoundError: false
+      AutoMigrate: true
+      Type: "sqlite3"
+      SqliteDbFilePath: "/data/tasks.db"
+      MaxOpenConns: 30
+      MaxIdleConns: 10
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nebula-studio-data
+  namespace: nebula
+  labels:
+    app.kubernetes.io/name: nebula-studio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nebula-studio
+  namespace: nebula
+  labels:
+    app.kubernetes.io/name: nebula-studio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nebula-studio
+  template:
+    metadata:
+      labels:
+        app: nebula-studio
+        app.kubernetes.io/name: nebula-studio
+    spec:
+      containers:
+        - name: nebula-studio
+          image: vesoft/nebula-graph-studio:v3.8.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - ./server
+          env:
+            - name: UPLOAD_DIR
+              value: /data
+          ports:
+            - name: http
+              containerPort: 7001
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 7001
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 7001
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: upload-data
+              mountPath: /data
+            - name: studio-config
+              mountPath: /app/etc
+              readOnly: true
+      volumes:
+        - name: studio-config
+          configMap:
+            name: nebula-studio-config
+            items:
+              - key: studio-api.yaml
+                path: studio-api.yaml
+        - name: upload-data
+          persistentVolumeClaim:
+            claimName: nebula-studio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nebula-studio
+  namespace: nebula
+  labels:
+    app.kubernetes.io/name: nebula-studio
+spec:
+  type: ClusterIP
+  selector:
+    app: nebula-studio
+  ports:
+    - name: http
+      port: 7001
+      targetPort: 7001
+      protocol: TCP

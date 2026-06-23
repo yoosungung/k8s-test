@@ -2,11 +2,11 @@
 # External access uses each app's usual port (80, 443, 5173, 5432, …) via hostPort
 # and a small socat sidecar (works when the cluster NodePort range is 30000–32767).
 # PostgreSQL: TCP stream on controller :5432, exposed on host :5432.
-# Qdrant: REST :6333 and gRPC :6334 exposed on the same host ports.
+# Qdrant: REST :6333 via HTTP Ingress (socat → nginx :80); gRPC :6334 TCP passthrough.
+# NebulaGraph Studio: :7001 via HTTP Ingress (socat → nginx :80).
 
 tcp:
   5432: "postgres/postgresql:5432"
-  6333: "qdrant/qdrant:6333"
   6334: "qdrant/qdrant:6334"
 
 controller:
@@ -68,6 +68,18 @@ controller:
           containerPort: 30000
           hostPort: 30000
           protocol: TCP
+        - name: embeddings
+          containerPort: 8080
+          hostPort: 8080
+          protocol: TCP
+        - name: qdrant
+          containerPort: 6333
+          hostPort: 6333
+          protocol: TCP
+        - name: nebula-studio
+          containerPort: 7001
+          hostPort: 7001
+          protocol: TCP
       command:
         - /bin/sh
         - -ec
@@ -76,4 +88,7 @@ controller:
           socat TCP-LISTEN:9119,fork,reuseaddr TCP:127.0.0.1:80 &
           socat TCP-LISTEN:8642,fork,reuseaddr TCP:127.0.0.1:80 &
           socat TCP-LISTEN:30000,fork,reuseaddr TCP:127.0.0.1:80 &
+          socat TCP-LISTEN:8080,fork,reuseaddr TCP:127.0.0.1:80 &
+          socat TCP-LISTEN:6333,fork,reuseaddr TCP:127.0.0.1:80 &
+          socat TCP-LISTEN:7001,fork,reuseaddr TCP:127.0.0.1:80 &
           wait
