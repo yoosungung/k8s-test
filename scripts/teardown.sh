@@ -77,12 +77,8 @@ if [ "$HAS_HELM" = true ]; then
             --patch='[{ "op": "remove", "path": "/metadata/finalizers" }]' || true
     fi
     helm uninstall opik --namespace opik || true
-    log_info "Uninstalling NebulaGraph cluster Helm release..."
-    helm uninstall nebula --namespace nebula || true
-    log_info "Uninstalling NebulaGraph Operator Helm release..."
-    helm uninstall nebula-operator --namespace nebula-operator-system || true
-    log_info "Uninstalling Qdrant Helm release..."
-    helm uninstall qdrant --namespace qdrant || true
+    log_info "Uninstalling Leantime Helm release..."
+    helm uninstall leantime --namespace leantime || true
     log_info "Uninstalling PostgreSQL Helm release..."
     helm uninstall postgresql --namespace postgres || true
     log_info "Uninstalling git-http-server Helm release..."
@@ -96,6 +92,7 @@ log_info "Deleting standalone secrets..."
 kubectl delete secret hf-token-secret -n llm-serving --ignore-not-found || true
 kubectl delete secret hermes-gateway-secrets -n ai-agents --ignore-not-found || true
 kubectl delete secret hermes-auth-secrets -n ai-agents --ignore-not-found || true
+kubectl delete secret k8s-test-tls -n ingress-nginx --ignore-not-found || true
 kubectl delete secret git-http-auth -n git --ignore-not-found || true
 
 # 2.7 Delete cluster-scoped RBAC resources (not tied to any namespace)

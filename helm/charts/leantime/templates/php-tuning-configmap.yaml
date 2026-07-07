@@ -1,0 +1,22 @@
+{{- if .Values.php.tuning.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "leantime.fullname" . }}-php-tuning
+  labels:
+    {{- include "leantime.labels" . | nindent 4 }}
+data:
+  zz-k8s-test.ini: |
+    ; k8s-test override — loads after image custom.ini (memory_limit was 1G)
+    memory_limit = {{ .Values.php.tuning.memoryLimit }}
+    max_execution_time = 300
+  zz-k8s-test-fpm.conf: |
+    ; k8s-test FPM pool override — loads after www.conf (pm.max_children was 50)
+    [www]
+    pm = dynamic
+    pm.max_children = {{ .Values.php.tuning.pmMaxChildren }}
+    pm.start_servers = {{ .Values.php.tuning.pmStartServers }}
+    pm.min_spare_servers = {{ .Values.php.tuning.pmMinSpareServers }}
+    pm.max_spare_servers = {{ .Values.php.tuning.pmMaxSpareServers }}
+    pm.max_requests = {{ .Values.php.tuning.pmMaxRequests }}
+{{- end }}

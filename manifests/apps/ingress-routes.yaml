@@ -1,6 +1,9 @@
-# Shared ingress-nginx routes (host *.k8s-test; external port = app Service port via controller hostPort).
+# Shared ingress-nginx routes (host *.k8s-test; external HTTPS on node :443).
+# TLS: mkcert wildcard → scripts/sync-k8s-test-tls-secret.sh → ingress-nginx/k8s-test-tls
 # Map hosts in /etc/hosts, e.g.:
-#   <NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test embeddings.k8s-test qdrant.k8s-test nebula-studio.k8s-test git.k8s-test
+#   <NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test embeddings.k8s-test leantime.k8s-test git.k8s-test
+#
+# Qdrant / NebulaGraph Studio ingress: path-graph deploy/k8s/infra/manifests/ingress-routes.yaml
 #
 # Git HTTP is defined in helm/charts/git-http-server (host git.k8s-test).
 
@@ -117,6 +120,33 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
+  name: leantime
+  namespace: leantime
+  labels:
+    app.kubernetes.io/name: leantime
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "32m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: leantime.k8s-test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: leantime
+                port:
+                  number: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
   name: bge-m3-tei
   namespace: llm-serving
   labels:
@@ -139,57 +169,3 @@ spec:
                 name: bge-m3-tei
                 port:
                   number: 8080
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: qdrant
-  namespace: qdrant
-  labels:
-    app.kubernetes.io/name: qdrant
-    app.kubernetes.io/component: ingress
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "32m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: qdrant.k8s-test
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: qdrant
-                port:
-                  number: 6333
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: nebula-studio
-  namespace: nebula
-  labels:
-    app.kubernetes.io/name: nebula-studio
-    app.kubernetes.io/component: ingress
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "0"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: nebula-studio.k8s-test
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: nebula-studio
-                port:
-                  number: 7001

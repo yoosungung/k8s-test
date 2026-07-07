@@ -15,7 +15,7 @@ Ensure all new files conform to the following directory layout:
 
 * **`/helm`**: All Helm-related configurations.
   * `/helm/charts/`: Custom helm charts created specifically for this test environment.
-  * `/helm/values/`: Value overrides for third-party helm charts (e.g. ingress-nginx, postgresql, qdrant, nebula-operator, nebula-cluster).
+  * `/helm/values/`: Value overrides for third-party helm charts (e.g. ingress-nginx, postgresql).
 * **`/manifests`**: Raw Kubernetes YAML manifests.
   * `/manifests/infra/`: Infrastructure-level manifests (e.g. Namespaces, StorageClasses, CRDs, GPU/Node configurations).
   * `/manifests/apps/`: Application-level manifests (e.g. Deployments, Services, ConfigMaps, Secrets).
@@ -63,10 +63,12 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | `FailedScheduling` + `untolerated taint` | Node `DiskPressure` → `node.kubernetes.io/disk-pressure:NoSchedule` | `kubectl describe node <node> \| grep -E 'Taints|DiskPressure'` |
 | `ErrImageNeverPull` on `git-http-server:local` | Image not on k3s node (often after disk cleanup) | In-cluster Kaniko job or `scripts/build-git-http-server-image.sh` |
 | `ImagePullBackOff` on SGLang | Registry rate limit or concurrent pulls | Scale deployment to 0, pre-pull on node with `k3s ctr images pull`, scale back |
-| NebulaGraph PVC `Pending` / `nc` not `READY` | `local-path` WaitForFirstConsumer; pod not scheduled (often disk-pressure taint) | `kubectl get pods,pvc -n nebula`; fix node pressure; see README → NebulaGraph |
-| Qdrant PVC `Pending` / `qdrant-0` not `Running` | `local-path` WaitForFirstConsumer; pod not scheduled (often disk-pressure taint) | `kubectl get pods,pvc -n qdrant`; fix node pressure; see README → Qdrant |
+| NebulaGraph PVC `Pending` / `nc` not `READY` | path-graph deploy pending or disk-pressure | path-graph: `make deploy-qdrant-nebula`; see path-graph SETUP |
+| Qdrant PVC `Pending` / `qdrant-0` not `Running` | path-graph deploy pending or disk-pressure | path-graph: `make deploy-qdrant-nebula`; see path-graph SETUP |
 | BGE-M3 TEI `connection refused` on `/health` | First boot model download (~1.1 GB) or CPU overload on bulk embed | `kubectl logs -n llm-serving deploy/bge-m3-tei`; `./scripts/verify-bge-m3-tei.sh`; see README → BGE-M3 TEI |
-| `404` on `qdrant.k8s-test` / `nebula-studio.k8s-test` | Ingress route or socat port not applied; wrong URL port | Use app port (`:6333`, `:7001`); apply `manifests/apps/ingress-routes.yaml`; upgrade ingress-nginx; see README → Qdrant / NebulaGraph Studio |
+| Leantime setup resets / `OOMKilled` | Image PHP-FPM defaults (`1G`×50 workers) exceed Pod limit | `kubectl describe pod -n leantime -l app.kubernetes.io/name=leantime`; see README → Leantime → PHP-FPM tuning |
+| `502` on `leantime.k8s-test/files/browse` | `browse.blade.php` `$module`/`$action` + menu `@include` / `get_defined_vars` OOM | README → Leantime → `/files/browse` patch; `./scripts/test-leantime-files-browse-fix.sh` |
+| `404` on `qdrant.k8s-test` / `nebula-studio.k8s-test` | path-graph ingress not applied or wrong Host | path-graph: `make deploy-qdrant-nebula`; access `https://qdrant.k8s-test/` / `https://nebula-studio.k8s-test/` |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
 
 Before destructive cluster-wide cleanup (`--field-selector`, force-delete all namespaces), prefer **targeted** pod deletes in the affected namespace only.

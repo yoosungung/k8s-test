@@ -1,0 +1,29 @@
+{{- if .Values.app.patch.filesBrowseFix.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "leantime.fullname" . }}-app-patch
+  labels:
+    {{- include "leantime.labels" . | nindent 4 }}
+data:
+  projectSelector.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/partials/projectSelector.blade.php" | nindent 4 }}
+  projectSelectorWrapper.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/projectSelector.blade.php" | nindent 4 }}
+  headMenu.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/headMenu.blade.php" | nindent 4 }}
+  app.blade.php: |
+{{ .Files.Get "patches/app/Views/Templates/layouts/app.blade.php" | nindent 4 }}
+  menu.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/menu.blade.php" | nindent 4 }}
+  projectGroup.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/partials/projectGroup.blade.php" | nindent 4 }}
+  noGroup.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/partials/noGroup.blade.php" | nindent 4 }}
+  clientGroup.blade.php: |
+{{ .Files.Get "patches/app/Domain/Menu/Templates/partials/clientGroup.blade.php" | nindent 4 }}
+  showAll.blade.php: |
+{{ .Files.Get "patches/app/Domain/Files/Templates/showAll.blade.php" | nindent 4 }}
+  browse.blade.php: |
+{{ .Files.Get "patches/app/Domain/Files/Templates/browse.blade.php" | nindent 4 }}
+{{- end }}

@@ -30,17 +30,18 @@ OPIK_NAMESPACE="opik"
 OPIK_RELEASE="opik"
 OPIK_VERSION="${OPIK_VERSION:-latest}"
 
+LEANTIME_NAMESPACE="leantime"
+LEANTIME_RELEASE="leantime"
+LEANTIME_VERSION="${LEANTIME_VERSION:-3.9.7}"
+LEANTIME_SMTP_SECRET_NAME="${LEANTIME_SMTP_SECRET_NAME:-leantime-smtp}"
+
 INGRESS_NAMESPACE="ingress-nginx"
 INGRESS_RELEASE="ingress-nginx"
 INGRESS_HTTP_NODEPORT="80"
 INGRESS_HTTPS_NODEPORT="443"
 POSTGRES_TCP_NODEPORT="5432"
-QDRANT_NAMESPACE="qdrant"
-QDRANT_RELEASE="qdrant"
 QDRANT_REST_NODEPORT="6333"
 QDRANT_GRPC_NODEPORT="6334"
-QDRANT_CHART_VERSION="${QDRANT_CHART_VERSION:-}"
-QDRANT_API_KEY="${QDRANT_API_KEY:-test-qdrant-api-key}"
 OPIK_HTTP_PORT="5173"
 SGLANG_HTTP_PORT="30000"
 BGE_M3_TEI_HTTP_PORT="8080"
@@ -52,18 +53,11 @@ GIT_HTTP_NAMESPACE="git"
 GIT_HTTP_RELEASE="git-http-server"
 GIT_HTTP_AUTH_SECRET="git-http-auth"
 K8S_TEST_DOMAIN_SUFFIX="${K8S_TEST_DOMAIN_SUFFIX:-k8s-test}"
+LEANTIME_INGRESS_HOST="${LEANTIME_INGRESS_HOST:-leantime.${K8S_TEST_DOMAIN_SUFFIX}}"
 GIT_HTTP_INGRESS_HOST="${GIT_HTTP_INGRESS_HOST:-git.${K8S_TEST_DOMAIN_SUFFIX}}"
 BUILD_GIT_HTTP_IMAGE="${BUILD_GIT_HTTP_IMAGE:-true}"
 GIT_HTTP_IMAGE_REPO="${GIT_HTTP_IMAGE_REPO:-git-http-server}"
 GIT_HTTP_IMAGE_TAG="${GIT_HTTP_IMAGE_TAG:-local}"
-
-NEBULA_OPERATOR_NAMESPACE="nebula-operator-system"
-NEBULA_OPERATOR_RELEASE="nebula-operator"
-NEBULA_CLUSTER_NAMESPACE="nebula"
-NEBULA_CLUSTER_RELEASE="nebula"
-NEBULA_OPERATOR_CHART_VERSION="${NEBULA_OPERATOR_CHART_VERSION:-1.8.0}"
-NEBULA_CLUSTER_CHART_VERSION="${NEBULA_CLUSTER_CHART_VERSION:-1.8.0}"
-NEBULA_STORAGE_CLASS="${NEBULA_STORAGE_CLASS:-local-path}"
 
 apply_hermes_gateway_secret() {
     local discord_token="$1"
@@ -100,18 +94,69 @@ generate_hermes_api_server_key() {
 }
 
 log_ingress_routes() {
-    log_info "External access (*.${K8S_TEST_DOMAIN_SUFFIX} — each app uses its service port); add to /etc/hosts:"
-    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} embeddings.${K8S_TEST_DOMAIN_SUFFIX} qdrant.${K8S_TEST_DOMAIN_SUFFIX} nebula-studio.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
-    log_info "  Opik UI:           http://opik.${K8S_TEST_DOMAIN_SUFFIX}:${OPIK_HTTP_PORT}/"
-    log_info "  Hermes dashboard:  http://hermes.${K8S_TEST_DOMAIN_SUFFIX}:${HERMES_DASHBOARD_PORT}/"
-    log_info "  Hermes API:        http://hermes-api.${K8S_TEST_DOMAIN_SUFFIX}:${HERMES_API_PORT}/"
-    log_info "  SGLang OpenAI:     http://sglang.${K8S_TEST_DOMAIN_SUFFIX}:${SGLANG_HTTP_PORT}/v1/"
-    log_info "  BGE-M3 TEI:        http://embeddings.${K8S_TEST_DOMAIN_SUFFIX}:${BGE_M3_TEI_HTTP_PORT}/v1/embeddings"
-    log_info "  Qdrant REST/UI:    http://qdrant.${K8S_TEST_DOMAIN_SUFFIX}:${QDRANT_REST_NODEPORT}/ (dashboard: /dashboard)"
-    log_info "  NebulaGraph Studio: http://nebula-studio.${K8S_TEST_DOMAIN_SUFFIX}:${NEBULA_STUDIO_HTTP_PORT}/"
-    log_info "  Git HTTP:          http://git.${K8S_TEST_DOMAIN_SUFFIX}:${INGRESS_HTTP_NODEPORT}/git/<repo>.git"
+    log_info "External access (*.${K8S_TEST_DOMAIN_SUFFIX} — HTTPS on :443); add to /etc/hosts:"
+    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} embeddings.${K8S_TEST_DOMAIN_SUFFIX} leantime.${K8S_TEST_DOMAIN_SUFFIX} qdrant.${K8S_TEST_DOMAIN_SUFFIX} nebula-studio.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
+    log_info "  Opik UI:           https://opik.${K8S_TEST_DOMAIN_SUFFIX}/"
+    log_info "  Leantime PM:       https://leantime.${K8S_TEST_DOMAIN_SUFFIX}/  (community MCP: scripts/fixtures/leantime-mcp-cursor.json)"
+    log_info "  Hermes dashboard:  https://hermes.${K8S_TEST_DOMAIN_SUFFIX}/"
+    log_info "  Hermes API:        https://hermes-api.${K8S_TEST_DOMAIN_SUFFIX}/"
+    log_info "  SGLang OpenAI:     https://sglang.${K8S_TEST_DOMAIN_SUFFIX}/v1/"
+    log_info "  BGE-M3 TEI:        https://embeddings.${K8S_TEST_DOMAIN_SUFFIX}/v1/embeddings"
+    log_info "  Qdrant REST/UI:    https://qdrant.${K8S_TEST_DOMAIN_SUFFIX}/ (path-graph: make deploy-qdrant-nebula)"
+    log_info "  NebulaGraph Studio: https://nebula-studio.${K8S_TEST_DOMAIN_SUFFIX}/ (path-graph)"
+    log_info "  Git HTTPS:         https://git.${K8S_TEST_DOMAIN_SUFFIX}/git/<repo>.git"
     log_info "  PostgreSQL (TCP):  psql -h <NODE_IP> -p ${POSTGRES_TCP_NODEPORT} -U hermes -d hermesdb"
     log_info "  Qdrant gRPC:       <NODE_IP>:${QDRANT_GRPC_NODEPORT}"
+}
+
+ensure_leantime_chart() {
+    local chart_dir="${ROOT_DIR}/helm/charts/leantime"
+    local sync_script="${ROOT_DIR}/scripts/sync-leantime-chart.sh"
+    if [ ! -f "${chart_dir}/Chart.yaml" ] || ! grep -q 'LEAN_APP_URL' "${chart_dir}/templates/deployment.yaml" 2>/dev/null; then
+        if [ ! -x "${sync_script}" ]; then
+            log_error "Leantime chart missing and sync script not found: ${sync_script}"
+            exit 1
+        fi
+        log_info "Syncing Leantime Helm chart from upstream..."
+        "${sync_script}"
+    fi
+    helm dependency build "${chart_dir}"
+}
+
+ensure_leantime_smtp_secret() {
+    local sync_script="${ROOT_DIR}/scripts/sync-leantime-smtp-secret.sh"
+    if [ ! -x "${sync_script}" ]; then
+        log_error "Leantime SMTP sync script not found: ${sync_script}"
+        exit 1
+    fi
+    "${sync_script}"
+}
+
+deploy_leantime() {
+    local chart_dir="${ROOT_DIR}/helm/charts/leantime"
+    local values_file="${ROOT_DIR}/helm/values/leantime.yaml"
+    local app_url="https://${LEANTIME_INGRESS_HOST}"
+
+    if ! kubectl get ingressclass nginx &>/dev/null; then
+        log_error "IngressClass 'nginx' not found. Run deploy_ingress_nginx first."
+        exit 1
+    fi
+
+    ensure_leantime_chart
+    ensure_leantime_smtp_secret
+
+    log_info "Installing/upgrading Leantime (${LEANTIME_VERSION}) in namespace '${LEANTIME_NAMESPACE}'..."
+    helm upgrade --install "${LEANTIME_RELEASE}" "${chart_dir}" \
+        --namespace "${LEANTIME_NAMESPACE}" \
+        --create-namespace \
+        -f "${values_file}" \
+        --set "image.tag=${LEANTIME_VERSION}" \
+        --set-string "app.url=${app_url}" \
+        --wait \
+        --timeout 20m
+
+    log_info "Leantime UI: ${app_url}/  (first boot: ${app_url}/install)"
+    log_info "Community MCP (Cursor): scripts/fixtures/leantime-mcp-cursor.json + uvx (see README → Leantime)"
 }
 
 deploy_opik() {
@@ -151,40 +196,32 @@ ensure_pgvector_extension() {
     fi
 }
 
-deploy_nebula() {
-    log_info "Ensuring NebulaGraph Operator Helm repo is registered..."
-    helm repo add nebula-operator https://vesoft-inc.github.io/nebula-operator/charts 2>/dev/null || true
-    helm repo update nebula-operator
+sync_hermes_pg_registry() {
+    local sync_script="${ROOT_DIR}/scripts/sync-hermes-pg-registry.sh"
+    if [ ! -x "${sync_script}" ]; then
+        log_warn "Hermes PG registry sync script not found; skipping."
+        return 0
+    fi
+    if ! kubectl get namespace ai-agents &>/dev/null; then
+        log_warn "Namespace ai-agents missing; skipping Hermes PG registry sync."
+        return 0
+    fi
+    log_info "Syncing Hermes PostgreSQL registry (all in-cluster :5432 services)..."
+    "${sync_script}"
+}
 
-    log_info "Installing/upgrading NebulaGraph Operator (chart ${NEBULA_OPERATOR_CHART_VERSION}) in namespace '${NEBULA_OPERATOR_NAMESPACE}'..."
-    helm upgrade --install "${NEBULA_OPERATOR_RELEASE}" nebula-operator/nebula-operator \
-        --namespace "${NEBULA_OPERATOR_NAMESPACE}" \
-        --create-namespace \
-        --version "${NEBULA_OPERATOR_CHART_VERSION}" \
-        -f "${ROOT_DIR}/helm/values/nebula-operator.yaml" \
-        --wait \
-        --timeout 10m
-
-    log_info "Waiting for NebulaGraph CRDs..."
-    kubectl wait --for=condition=Established crd/nebulaclusters.apps.nebula-graph.io --timeout=120s
-
-    log_info "Installing/upgrading NebulaGraph cluster (chart ${NEBULA_CLUSTER_CHART_VERSION}, v3.8.0) in namespace '${NEBULA_CLUSTER_NAMESPACE}'..."
-    helm upgrade --install "${NEBULA_CLUSTER_RELEASE}" nebula-operator/nebula-cluster \
-        --namespace "${NEBULA_CLUSTER_NAMESPACE}" \
-        --create-namespace \
-        --version "${NEBULA_CLUSTER_CHART_VERSION}" \
-        -f "${ROOT_DIR}/helm/values/nebula-cluster.yaml" \
-        --set "nebula.storageClassName=${NEBULA_STORAGE_CLASS}" \
-        --wait \
-        --timeout 15m
-
-    log_info "Waiting for NebulaGraph cluster to become ready..."
-    kubectl wait --for=condition=Ready nebulacluster/"${NEBULA_CLUSTER_RELEASE}" \
-        -n "${NEBULA_CLUSTER_NAMESPACE}" --timeout=300s
-
-    log_info "NebulaGraph graphd in-cluster: nebula-graphd-svc.${NEBULA_CLUSTER_NAMESPACE}.svc.cluster.local:9669"
-    log_info "NebulaGraph Studio external: http://nebula-studio.${K8S_TEST_DOMAIN_SUFFIX}:${NEBULA_STUDIO_HTTP_PORT}/"
-    log_info "NebulaGraph graphd external: kubectl get svc -n ${NEBULA_CLUSTER_NAMESPACE} nebula-graphd-svc (NodePort)"
+sync_k8s_test_tls_secret() {
+    if [[ "${SKIP_K8S_TEST_TLS:-false}" == true ]]; then
+        log_warn "SKIP_K8S_TEST_TLS=true — ingress-nginx HTTPS will fail without secret k8s-test-tls."
+        return 0
+    fi
+    local sync_script="${ROOT_DIR}/scripts/sync-k8s-test-tls-secret.sh"
+    if [ ! -x "${sync_script}" ]; then
+        log_error "TLS sync script not found: ${sync_script}"
+        exit 1
+    fi
+    log_info "Syncing mkcert wildcard TLS secret for *.${K8S_TEST_DOMAIN_SUFFIX}..."
+    "${sync_script}"
 }
 
 deploy_ingress_nginx() {
@@ -214,9 +251,8 @@ deploy_ingress_nginx() {
         --selector=app.kubernetes.io/component=controller \
         --timeout=300s
 
-    log_info "External ports: Git/HTTP ${INGRESS_HTTP_NODEPORT}, HTTPS ${INGRESS_HTTPS_NODEPORT}, Opik ${OPIK_HTTP_PORT}, Hermes ${HERMES_DASHBOARD_PORT}, API ${HERMES_API_PORT}, SGLang ${SGLANG_HTTP_PORT}, BGE-M3 TEI ${BGE_M3_TEI_HTTP_PORT}, Qdrant REST ${QDRANT_REST_NODEPORT}, Qdrant gRPC ${QDRANT_GRPC_NODEPORT}, Nebula Studio ${NEBULA_STUDIO_HTTP_PORT}"
-    log_info "Shared Ingress HTTP:  http://<NODE_IP>:${INGRESS_HTTP_NODEPORT}/ (Git: git.${K8S_TEST_DOMAIN_SUFFIX})"
-    log_info "Shared Ingress HTTPS: https://<NODE_IP>:${INGRESS_HTTPS_NODEPORT}/"
+    log_info "External HTTPS: https://<app>.${K8S_TEST_DOMAIN_SUFFIX}/ (port ${INGRESS_HTTPS_NODEPORT}); HTTP redirects to HTTPS"
+    log_info "PostgreSQL TCP: <NODE_IP>:${POSTGRES_TCP_NODEPORT}; Qdrant gRPC: <NODE_IP>:${QDRANT_GRPC_NODEPORT}"
 }
 
 ensure_git_http_auth_secret() {
@@ -236,31 +272,6 @@ ensure_git_http_auth_secret() {
         --namespace "${GIT_HTTP_NAMESPACE}" \
         --from-literal=htpasswd="${user}:${hash}" \
         --dry-run=client -o yaml | kubectl apply -f -
-}
-
-deploy_qdrant() {
-    log_info "Ensuring Qdrant Helm repo is registered..."
-    helm repo add qdrant https://qdrant.github.io/qdrant-helm 2>/dev/null || true
-    helm repo update qdrant
-
-    local chart_version_args=()
-    if [[ -n "${QDRANT_CHART_VERSION}" ]]; then
-        chart_version_args=(--version "${QDRANT_CHART_VERSION}")
-    fi
-
-    log_info "Installing/upgrading Qdrant in namespace '${QDRANT_NAMESPACE}'..."
-    helm upgrade --install "${QDRANT_RELEASE}" qdrant/qdrant \
-        --namespace "${QDRANT_NAMESPACE}" \
-        --create-namespace \
-        -f "${ROOT_DIR}/helm/values/qdrant.yaml" \
-        --set "apiKey=${QDRANT_API_KEY}" \
-        "${chart_version_args[@]}" \
-        --wait \
-        --timeout 10m
-
-    log_info "Qdrant REST in-cluster: ${QDRANT_RELEASE}.${QDRANT_NAMESPACE}.svc.cluster.local:${QDRANT_REST_NODEPORT}"
-    log_info "Qdrant gRPC in-cluster: ${QDRANT_RELEASE}.${QDRANT_NAMESPACE}.svc.cluster.local:${QDRANT_GRPC_NODEPORT}"
-    log_info "Qdrant REST external:   http://qdrant.${K8S_TEST_DOMAIN_SUFFIX}:${QDRANT_REST_NODEPORT}/ (api-key header; UI: /dashboard)"
 }
 
 deploy_git_http_server() {
@@ -301,7 +312,7 @@ deploy_git_http_server() {
         --wait \
         --timeout 10m
 
-    log_info "Git HTTP (Ingress): http://${GIT_HTTP_INGRESS_HOST}:${INGRESS_HTTP_NODEPORT}/git/<repo>.git"
+    log_info "Git HTTPS (Ingress): https://${GIT_HTTP_INGRESS_HOST}/git/<repo>.git"
     log_info "Git HTTP in-cluster: http://${GIT_HTTP_RELEASE}.${GIT_HTTP_NAMESPACE}.svc.cluster.local/git/<repo>.git"
 }
 
@@ -363,6 +374,7 @@ fi
 # 3. Install/Upgrade Helm Charts
 if [ "$HAS_HELM" = true ]; then
     log_info "Deploying Helm releases..."
+    sync_k8s_test_tls_secret
     deploy_ingress_nginx
 
     log_info "Ensuring Bitnami Helm repo is registered..."
@@ -377,11 +389,9 @@ if [ "$HAS_HELM" = true ]; then
 
     ensure_pgvector_extension
 
-    deploy_qdrant
-
-    deploy_nebula
-
     deploy_git_http_server
+
+    deploy_leantime
 
     deploy_opik
 fi
@@ -512,6 +522,7 @@ else
 fi
 
 if [ "$HAS_HELM" = true ]; then
+    sync_hermes_pg_registry
     log_ingress_routes
 fi
 

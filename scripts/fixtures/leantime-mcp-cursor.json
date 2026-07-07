@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "leantime": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/daniel-eder/leantime-mcp.git",
+        "leantime-mcp"
+      ],
+      "env": {
+        "LEANTIME_URL": "https://leantime.k8s-test",
+        "LEANTIME_API_KEY": "REPLACE_WITH_API_KEY",
+        "LEANTIME_USER_EMAIL": "REPLACE_WITH_EMAIL"
+      }
+    }
+  }
+}

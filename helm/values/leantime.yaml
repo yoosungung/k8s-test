@@ -1,0 +1,89 @@
+# Helm values for Leantime project management (test environment).
+# Chart: helm/charts/leantime (synced from https://github.com/Leantime/leantime via scripts/sync-leantime-chart.sh)
+# Docs: https://docs.leantime.io/
+
+global:
+  security:
+    allowInsecureImages: true
+
+replicaCount: 1
+
+image:
+  repository: leantime/leantime
+  pullPolicy: IfNotPresent
+  tag: "3.9.7"
+
+persistence:
+  enabled: true
+  size: 2Gi
+
+app:
+  sitename: "k8s-test Leantime"
+  leanSessionSecure: "true"
+  language: "en-US"
+  defaultTimezone: "Asia/Seoul"
+  url: "https://leantime.k8s-test"
+  patch:
+    filesBrowseFix:
+      enabled: true
+  session:
+    password: "k8s-test-leantime-session"
+    expiration: 480
+  email:
+    enabled: true
+    return: "dulle2@gmail.com"
+    smtp:
+      hosts: "smtp.gmail.com"
+      username: "dulle2@gmail.com"
+      existingSecret: leantime-smtp
+      secretKey: password
+      port: 587
+      secure: "tls"
+      autoTLS: true
+
+php:
+  tuning:
+    enabled: true
+    memoryLimit: 512M
+    pmMaxChildren: 8
+    pmStartServers: 2
+    pmMinSpareServers: 2
+    pmMaxSpareServers: 4
+    pmMaxRequests: 500
+
+mariadb:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/mariadb
+    tag: 11.4.5-debian-12-r12
+  auth:
+    rootPassword: "leantime-root-k8s-test"
+    database: "leantime"
+    username: "leantime"
+    password: "leantime-k8s-test"
+  primary:
+    persistence:
+      size: 4Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 200m
+    memory: 512Mi
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
