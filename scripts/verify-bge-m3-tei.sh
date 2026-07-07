@@ -9,6 +9,8 @@ PORT="${BGE_M3_TEI_PORT:-8080}"
 MODEL="${BGE_M3_TEI_MODEL:-BAAI/bge-m3}"
 EXPECTED_DIM="${BGE_M3_EXPECTED_DIM:-1024}"
 INGRESS_HOST="${BGE_M3_TEI_INGRESS_HOST:-embeddings.k8s-test}"
+INGRESS_SCHEME="${BGE_M3_TEI_INGRESS_SCHEME:-https}"
+INGRESS_PORT="${BGE_M3_TEI_INGRESS_PORT:-443}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -69,14 +71,17 @@ ok "Dense embedding dimension is ${EXPECTED_DIM}"
 
 node_ip="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')"
 if [[ -n "${node_ip}" ]]; then
-  ext_url="http://${node_ip}:${PORT}/v1/embeddings"
-  if curl -sf --max-time 30 -H "Host: ${INGRESS_HOST}" \
-    -H 'Content-Type: application/json' \
+  ext_url="${INGRESS_SCHEME}://${node_ip}:${INGRESS_PORT}/v1/embeddings"
+  curl_opts=(-sf --max-time 30 -H "Host: ${INGRESS_HOST}" -H 'Content-Type: application/json')
+  if [[ "${INGRESS_SCHEME}" == https ]]; then
+    curl_opts+=(--insecure)
+  fi
+  if curl "${curl_opts[@]}" \
     -d "{\"model\": \"${MODEL}\", \"input\": \"hello\"}" \
     "${ext_url}" >/dev/null 2>&1; then
-    ok "External HTTP reachable at ${ext_url} (Host: ${INGRESS_HOST})"
+    ok "External ${INGRESS_SCHEME} reachable at ${ext_url} (Host: ${INGRESS_HOST})"
   else
-    warn "External ${ext_url} not reachable from this host (set /etc/hosts: ${node_ip} ${INGRESS_HOST})"
+    warn "External ${ext_url} not reachable from this host (set /etc/hosts: ${node_ip} ${INGRESS_HOST}; mkcert -install)"
   fi
 fi
 

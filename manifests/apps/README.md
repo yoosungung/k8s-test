@@ -8,12 +8,11 @@ This directory contains raw Kubernetes manifests for application workloads runni
 | -------- | ----------- | ------- | ------------- |
 | `sglang-gemma4-12b.yaml` | `llm-serving` | Gemma 4 12B LLM (2× GPU) | `scripts/verify-sglang.sh` |
 | `bge-m3-tei.yaml` | `llm-serving` | BAAI/bge-m3 dense embeddings (CPU TEI) | `scripts/test-bge-m3-tei-config.sh`, `scripts/verify-bge-m3-tei.sh` |
-| `ingress-routes.yaml` | various | Shared `*.k8s-test` Ingress routes | — |
-| `nebula-studio.yaml` | `nebula` | NebulaGraph Studio web GUI (v3.8.0) | `scripts/test-nebula-studio-config.sh`, `scripts/verify-nebula-studio.sh` |
+| `ingress-routes.yaml` | various | Shared `*.k8s-test` Ingress routes (HTTPS :443; Qdrant/Studio: path-graph) | `scripts/test-k8s-test-tls-config.sh`, `scripts/test-leantime-config.sh` |
 | `hermes-*.yaml` | `ai-agents` | Hermes agent stack | — |
 | `hf-secret.yaml` | `llm-serving` | Placeholder Hugging Face token (template) | — |
 
-Full operational docs: [`README.md`](../README.md) → External access, BGE-M3 TEI, SGLang, Qdrant.
+Full operational docs: [`README.md`](../README.md) → External access, BGE-M3 TEI, SGLang. Qdrant/Nebula: [path-graph](../path-graph/deploy/SETUP.md).
 
 ## Target components
 

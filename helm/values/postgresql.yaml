@@ -1,6 +1,11 @@
 # Helm Values for Bitnami PostgreSQL Deployment in Test Environment
 # Recommended chart version: 18.6.x (PostgreSQL 18.4.0)
 
+# Hermes discovers :5432 via scripts/sync-hermes-pg-registry.sh; writable config is opt-in.
+commonLabels:
+  k8s-test.io/postgres-instance: "true"
+  k8s-test.io/hermes-pg-config: "true"
+
 auth:
   # Enable admin user remote access
   enablePostgresUser: true

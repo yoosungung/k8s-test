@@ -1,5 +1,5 @@
 # Git Smart HTTP behind the shared ingress-nginx controller.
-# External: http://git.k8s-test:80/git/<repo>.git
+# External: https://git.k8s-test/git/<repo>.git
 # In-cluster: http://git-http-server.git.svc.cluster.local/git/<repo>.git
 
 image:

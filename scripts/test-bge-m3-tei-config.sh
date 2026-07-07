@@ -31,7 +31,10 @@ grep -q 'embeddings.k8s-test' "${INGRESS}" || fail "Expected embeddings.k8s-test
 grep -q 'bge-m3-tei' "${INGRESS}" || fail "Expected bge-m3-tei service in ingress-routes.yaml"
 ok "Ingress route references bge-m3-tei"
 
-grep -q '8080' "${ROOT_DIR}/helm/values/ingress-nginx.yaml" || fail "Expected hostPort 8080 in ingress-nginx values"
-ok "ingress-nginx exposes port 8080 for TEI"
+grep -q 'default-ssl-certificate' "${ROOT_DIR}/helm/values/ingress-nginx.yaml" \
+  || fail "Expected default-ssl-certificate in ingress-nginx values (HTTPS :443)"
+grep -q 'hostPort: 8080' "${ROOT_DIR}/helm/values/ingress-nginx.yaml" \
+  && fail "Per-app hostPort 8080 must be removed (unified HTTPS :443)"
+ok "ingress-nginx uses shared HTTPS on :443"
 
 ok "BGE-M3 TEI config validation passed"

@@ -29,7 +29,7 @@ ingress:
 
 git:
   # URL path prefix (no trailing slash). Clone URL pattern:
-  #   http://git.k8s-test:80/git/<repo>.git
+  #   https://git.k8s-test/git/<repo>.git
   urlPrefix: /git
   projectRoot: /srv/git
 

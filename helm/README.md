@@ -5,34 +5,18 @@ This directory is dedicated to Helm charts and release configuration values.
 ## Structure
 
 - **`charts/`**: Store custom Helm charts created for your workloads here.
-- **`values/`**: Overrides for official/public Helm charts should be stored here as `<release-or-chart-name>.yaml` (e.g. `nebula-operator.yaml`, `nebula-cluster.yaml`).
+- **`values/`**: Overrides for official/public Helm charts should be stored here as `<release-or-chart-name>.yaml` (e.g. `ingress-nginx.yaml`, `postgresql.yaml`).
 
 ## Installed third-party charts (via `deploy.sh`)
 
 | Release | Chart | Values file | Verify script |
 | -------- | ----- | ------------- | ------------- |
-| `ingress-nginx` | `ingress-nginx/ingress-nginx` | `helm/values/ingress-nginx.yaml` | — (hostPorts: 80, 443, 5173, 9119, 8642, 30000, **8080**, **6333**, **7001**; TCP 5432, 6334) |
+| `ingress-nginx` | `ingress-nginx/ingress-nginx` | `helm/values/ingress-nginx.yaml` | `scripts/test-k8s-test-tls-config.sh` (HTTPS :443, mkcert TLS) |
 | `postgresql` | `bitnami/postgresql` | `helm/values/postgresql.yaml` | — |
-| `qdrant` | `qdrant/qdrant` | `helm/values/qdrant.yaml` | `scripts/test-qdrant-config.sh`, `scripts/verify-qdrant.sh` |
-| `nebula-operator` | `nebula-operator/nebula-operator` | `helm/values/nebula-operator.yaml` | — |
-| `nebula` | `nebula-operator/nebula-cluster` | `helm/values/nebula-cluster.yaml` | — |
 | `git-http-server` | `helm/charts/git-http-server` | `helm/values/git-http-server.yaml` | — |
 | `opik` | `opik/opik` | `helm/values/opik.yaml` | — |
 
-Validate NebulaGraph values before install:
-
-```bash
-helm repo add nebula-operator https://vesoft-inc.github.io/nebula-operator/charts
-helm template nebula nebula-operator/nebula-cluster \
-  --version 1.8.0 -f helm/values/nebula-cluster.yaml \
-  --set nebula.storageClassName=local-path
-```
-
-Validate Qdrant values before install:
-
-```bash
-./scripts/test-qdrant-config.sh
-```
+Qdrant and NebulaGraph Helm values live in [path-graph](../path-graph/deploy/k8s/infra/helm/values/).
 
 Validate BGE-M3 TEI manifest before apply (raw Deployment, not Helm):
 

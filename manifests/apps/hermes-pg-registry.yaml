@@ -1,0 +1,21 @@
+# Hermes PostgreSQL registry — populated by scripts/sync-hermes-pg-registry.sh
+#
+# Convention (add to every new PostgreSQL Helm chart / manifest):
+#   labels:
+#     k8s-test.io/postgres-instance: "true"   # discovery (optional if Service exposes :5432)
+#     k8s-test.io/hermes-pg-config: "true"      # opt-in: Hermes may patch Secrets/ConfigMaps
+#
+# RBAC: hermes-k8s-operator already grants cluster-wide ConfigMap/Secret read+write.
+# This registry tells Hermes *which* objects belong to which :5432 endpoint — no per-PG RBAC edits.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-pg-registry
+  namespace: ai-agents
+  labels:
+    app.kubernetes.io/name: hermes-pg-registry
+    app.kubernetes.io/part-of: k8s-test
+    k8s-test.io/postgres-registry: "true"
+data:
+  registry.json: |
+    {"version":1,"instances":[],"generatedBy":"scripts/sync-hermes-pg-registry.sh","note":"Run sync script to populate"}

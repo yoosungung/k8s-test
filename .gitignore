@@ -1,0 +1,2 @@
+# mkcert wildcard certs for *.k8s-test (never commit private keys)
+.certs/

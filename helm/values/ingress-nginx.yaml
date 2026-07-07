@@ -1,9 +1,7 @@
 # Shared cluster Ingress controller (test / bare-metal).
-# External access uses each app's usual port (80, 443, 5173, 5432, …) via hostPort
-# and a small socat sidecar (works when the cluster NodePort range is 30000–32767).
+# External HTTP apps use https://<app>.k8s-test/ on node :443 (mkcert wildcard TLS).
 # PostgreSQL: TCP stream on controller :5432, exposed on host :5432.
-# Qdrant: REST :6333 via HTTP Ingress (socat → nginx :80); gRPC :6334 TCP passthrough.
-# NebulaGraph Studio: :7001 via HTTP Ingress (socat → nginx :80).
+# Qdrant gRPC :6334 TCP passthrough (REST/UI: HTTPS Ingress on :443; path-graph repo).
 
 tcp:
   5432: "postgres/postgresql:5432"
@@ -30,10 +28,15 @@ controller:
   service:
     type: ClusterIP
 
-  # Preserve client IP when using hostPort on single-node / LAN setups.
+  # Wildcard mkcert cert (scripts/sync-k8s-test-tls-secret.sh → secret k8s-test-tls).
+  extraArgs:
+    default-ssl-certificate: "ingress-nginx/k8s-test-tls"
+
   config:
     use-forwarded-headers: "true"
     compute-full-forwarded-for: "true"
+    ssl-redirect: "true"
+    force-ssl-redirect: "true"
 
   metrics:
     enabled: false
@@ -41,54 +44,3 @@ controller:
   # Avoid pre-upgrade hook jobs on flaky test clusters; Ingress still works without validation.
   admissionWebhooks:
     enabled: false
-
-  # Proxy app service ports on the host to controller HTTP (:80) or TCP (:5432).
-  extraContainers:
-    - name: external-port-proxy
-      image: alpine/socat:1.8.0.0
-      imagePullPolicy: IfNotPresent
-      securityContext:
-        capabilities:
-          add:
-            - NET_BIND_SERVICE
-      ports:
-        - name: opik
-          containerPort: 5173
-          hostPort: 5173
-          protocol: TCP
-        - name: hermes-dash
-          containerPort: 9119
-          hostPort: 9119
-          protocol: TCP
-        - name: hermes-api
-          containerPort: 8642
-          hostPort: 8642
-          protocol: TCP
-        - name: sglang
-          containerPort: 30000
-          hostPort: 30000
-          protocol: TCP
-        - name: embeddings
-          containerPort: 8080
-          hostPort: 8080
-          protocol: TCP
-        - name: qdrant
-          containerPort: 6333
-          hostPort: 6333
-          protocol: TCP
-        - name: nebula-studio
-          containerPort: 7001
-          hostPort: 7001
-          protocol: TCP
-      command:
-        - /bin/sh
-        - -ec
-        - |
-          socat TCP-LISTEN:5173,fork,reuseaddr TCP:127.0.0.1:80 &
-          socat TCP-LISTEN:9119,fork,reuseaddr TCP:127.0.0.1:80 &
-          socat TCP-LISTEN:8642,fork,reuseaddr TCP:127.0.0.1:80 &
-          socat TCP-LISTEN:30000,fork,reuseaddr TCP:127.0.0.1:80 &
-          socat TCP-LISTEN:8080,fork,reuseaddr TCP:127.0.0.1:80 &
-          socat TCP-LISTEN:6333,fork,reuseaddr TCP:127.0.0.1:80 &
-          socat TCP-LISTEN:7001,fork,reuseaddr TCP:127.0.0.1:80 &
-          wait
