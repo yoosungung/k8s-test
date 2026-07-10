@@ -1,11 +1,9 @@
 # Shared cluster Ingress controller (test / bare-metal).
 # External HTTP apps use https://<app>.k8s-test/ on node :443 (mkcert wildcard TLS).
 # PostgreSQL: TCP stream on controller :5432, exposed on host :5432.
-# Qdrant gRPC :6334 TCP passthrough (REST/UI: HTTPS Ingress on :443; path-graph repo).
 
 tcp:
   5432: "postgres/postgresql:5432"
-  6334: "qdrant/qdrant:6334"
 
 controller:
   # hostPort binds node ports; RollingUpdate cannot schedule a second pod on one node.
