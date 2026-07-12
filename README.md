@@ -192,6 +192,30 @@ To remove all components and clean up the namespaces created for testing:
 
 Runbooks for common failures on the single-node k3s test cluster (`didim-gpu`). After fixing the root cause, workloads usually reconcile within **a few minutes**; image-related failures need extra steps below.
 
+### Hermes gateway / API (`:8642`) stuck
+
+**Symptoms**
+
+- `https://hermes-api.k8s-test/` or in-pod `127.0.0.1:8642` connection refused
+- Gateway log loops: `Gateway already running (PID …)`
+- `gateway_state.json` shows `api_server.state: disconnected` while argv is `hermes gateway restart` (not `gateway run`)
+
+**Cause:** A stuck `hermes gateway restart` process holds the gateway PID lock; s6 cannot start a healthy `gateway run`, so the API server never binds `:8642`. (`hermes-wiki-master` has no API server by design — only dashboard `:9119`.)
+
+**Fix** ([`manifests/apps/hermes-master.yaml`](manifests/apps/hermes-master.yaml)):
+
+```bash
+kubectl exec -n ai-agents hermes-master-0 -- sh -c \
+  'su -s /bin/sh hermes -c "HERMES_HOME=/opt/data /opt/hermes/.venv/bin/hermes gateway stop"'
+# s6 restarts gateway; wait a few seconds, then verify:
+kubectl exec -n ai-agents hermes-master-0 -- sh -c \
+  'python3 -c "import json;d=json.load(open(\"/opt/data/gateway_state.json\"));print(d[\"argv\"], {k:v[\"state\"] for k,v in d[\"platforms\"].items()})"'
+kubectl exec -n ai-agents hermes-master-0 -- sh -c \
+  'curl -sS -m 5 -H "Authorization: Bearer $API_SERVER_KEY" http://127.0.0.1:8642/v1/models'
+```
+
+Expect `argv` containing `gateway run`, `api_server: connected`, and HTTP 200 from `/v1/models`.
+
 ### Node disk pressure (`FailedScheduling` / untolerated taint)
 
 **Symptoms**
