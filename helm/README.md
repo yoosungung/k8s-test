@@ -16,7 +16,7 @@ This directory is dedicated to Helm charts and release configuration values.
 | `git-http-server` | `helm/charts/git-http-server` | `helm/values/git-http-server.yaml` | — |
 | `opik` | `opik/opik` | `helm/values/opik.yaml` | — |
 
-Qdrant and NebulaGraph Helm values live in [path-graph](../path-graph/deploy/k8s/infra/helm/values/).
+NebulaGraph/path-graph Helm values, when needed, are managed by the sibling [path-graph](../path-graph) repo. Qdrant is not installed or operated by `k8s-test`.
 
 Validate BGE-M3 TEI manifest before apply (raw Deployment, not Helm):
 

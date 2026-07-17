@@ -40,8 +40,6 @@ INGRESS_RELEASE="ingress-nginx"
 INGRESS_HTTP_NODEPORT="80"
 INGRESS_HTTPS_NODEPORT="443"
 POSTGRES_TCP_NODEPORT="5432"
-QDRANT_REST_NODEPORT="6333"
-QDRANT_GRPC_NODEPORT="6334"
 OPIK_HTTP_PORT="5173"
 SGLANG_HTTP_PORT="30000"
 BGE_M3_TEI_HTTP_PORT="8080"
@@ -133,18 +131,16 @@ generate_hermes_api_server_key() {
 
 log_ingress_routes() {
     log_info "External access (*.${K8S_TEST_DOMAIN_SUFFIX} — HTTPS on :443); add to /etc/hosts:"
-    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} embeddings.${K8S_TEST_DOMAIN_SUFFIX} leantime.${K8S_TEST_DOMAIN_SUFFIX} qdrant.${K8S_TEST_DOMAIN_SUFFIX} nebula-studio.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
+    log_info "  <NODE_IP>  opik.${K8S_TEST_DOMAIN_SUFFIX} hermes.${K8S_TEST_DOMAIN_SUFFIX} hermes-api.${K8S_TEST_DOMAIN_SUFFIX} sglang.${K8S_TEST_DOMAIN_SUFFIX} embeddings.${K8S_TEST_DOMAIN_SUFFIX} leantime.${K8S_TEST_DOMAIN_SUFFIX} nebula-studio.${K8S_TEST_DOMAIN_SUFFIX} git.${K8S_TEST_DOMAIN_SUFFIX}"
     log_info "  Opik UI:           https://opik.${K8S_TEST_DOMAIN_SUFFIX}/"
     log_info "  Leantime PM:       https://leantime.${K8S_TEST_DOMAIN_SUFFIX}/  (community MCP: scripts/fixtures/leantime-mcp-cursor.json)"
     log_info "  Hermes dashboard:  https://hermes.${K8S_TEST_DOMAIN_SUFFIX}/"
     log_info "  Hermes API:        https://hermes-api.${K8S_TEST_DOMAIN_SUFFIX}/"
     log_info "  SGLang OpenAI:     https://sglang.${K8S_TEST_DOMAIN_SUFFIX}/v1/"
     log_info "  BGE-M3 TEI:        https://embeddings.${K8S_TEST_DOMAIN_SUFFIX}/v1/embeddings"
-    log_info "  Qdrant REST/UI:    https://qdrant.${K8S_TEST_DOMAIN_SUFFIX}/ (path-graph: make deploy-qdrant-nebula)"
     log_info "  NebulaGraph Studio: https://nebula-studio.${K8S_TEST_DOMAIN_SUFFIX}/ (path-graph)"
     log_info "  Git HTTPS:         https://git.${K8S_TEST_DOMAIN_SUFFIX}/git/<repo>.git"
     log_info "  PostgreSQL (TCP):  psql -h <NODE_IP> -p ${POSTGRES_TCP_NODEPORT} -U hermes -d hermesdb"
-    log_info "  Qdrant gRPC:       <NODE_IP>:${QDRANT_GRPC_NODEPORT}"
 }
 
 ensure_leantime_chart() {
@@ -290,7 +286,7 @@ deploy_ingress_nginx() {
         --timeout=300s
 
     log_info "External HTTPS: https://<app>.${K8S_TEST_DOMAIN_SUFFIX}/ (port ${INGRESS_HTTPS_NODEPORT}); HTTP redirects to HTTPS"
-    log_info "PostgreSQL TCP: <NODE_IP>:${POSTGRES_TCP_NODEPORT}; Qdrant gRPC: <NODE_IP>:${QDRANT_GRPC_NODEPORT}"
+    log_info "PostgreSQL TCP: <NODE_IP>:${POSTGRES_TCP_NODEPORT}"
 }
 
 ensure_git_http_auth_secret() {

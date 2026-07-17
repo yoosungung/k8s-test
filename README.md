@@ -134,13 +134,9 @@ To deploy all configurations, infrastructure elements, and applications in the c
 3. **Secrets** — Hugging Face, Hermes gateway/auth
 4. **Apps** — `manifests/apps/` (Hermes, SGLang, **BGE-M3 TEI**, ingress routes)
 
-**Qdrant · NebulaGraph** — owned by [path-graph](../path-graph). Deploy separately:
+**NebulaGraph / path-graph** — managed outside this repo. Qdrant is no longer an operating target for `k8s-test`; do not expect a `qdrant` namespace, Qdrant PVC, or `qdrant.k8s-test` route in the live cluster.
 
-```bash
-cd ../path-graph && make deploy-qdrant-nebula
-```
-
-See [path-graph deploy/SETUP.md](../path-graph/deploy/SETUP.md#qdrant--nebulagraph).
+See the sibling [path-graph](../path-graph) repo for any graph/pipeline-specific deployment notes.
 
 BGE-M3 TEI-only apply (after `llm-serving` namespace and `hf-token-secret` exist):
 
@@ -436,7 +432,7 @@ Manifest uses `imagePullPolicy: IfNotPresent`, so a successful node pull is reus
 | BGE-M3 TEI | `1/1` in `llm-serving` | `./scripts/verify-bge-m3-tei.sh`; first start downloads ~1.1 GB model |
 | git-http-server | `1/1` in `git` | Rebuild/import image (above) |
 | Leantime | `1/1` in `leantime` | `./scripts/verify-leantime.sh`; first boot → `/install` |
-| Qdrant / NebulaGraph | path-graph repo | `cd ../path-graph && make verify-qdrant-nebula` |
+| NebulaGraph / path-graph | managed outside this repo | Verify from the `../path-graph` repo when that stack is intentionally deployed |
 
 ---
 
@@ -449,15 +445,13 @@ Replace `<NODE_IP>` with any cluster node (e.g. `192.168.150.200`). External URL
 Add to `/etc/hosts`:
 
 ```text
-<NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test embeddings.k8s-test leantime.k8s-test qdrant.k8s-test nebula-studio.k8s-test git.k8s-test
+<NODE_IP>  opik.k8s-test hermes.k8s-test hermes-api.k8s-test sglang.k8s-test embeddings.k8s-test leantime.k8s-test nebula-studio.k8s-test git.k8s-test
 ```
 
 | Service | Host | External URL | In-cluster |
 | -------- | ------ | ------------ | ---------- |
 | Ingress (HTTPS) | — | `https://<NODE_IP>:443` | — |
 | PostgreSQL | — | `psql -h <NODE_IP> -p 5432 …` | `postgresql.postgres.svc.cluster.local:5432` |
-| Qdrant REST / Web UI | `qdrant.k8s-test` | `https://qdrant.k8s-test/` | `qdrant.qdrant.svc.cluster.local:6333` (path-graph) |
-| Qdrant gRPC | — | `<NODE_IP>:6334` | `qdrant.qdrant.svc.cluster.local:6334` (path-graph) |
 | Opik UI | `opik.k8s-test` | `https://opik.k8s-test/` | `opik-frontend.opik.svc.cluster.local:5173` |
 | Leantime PM | `leantime.k8s-test` | `https://leantime.k8s-test/` | `leantime.leantime.svc.cluster.local:80` |
 | Hermes dashboard | `hermes.k8s-test` | `https://hermes.k8s-test/` | `hermes-master.ai-agents.svc.cluster.local:9119` |
@@ -468,7 +462,7 @@ Add to `/etc/hosts`:
 | NebulaGraph Studio | `nebula-studio.k8s-test` | `https://nebula-studio.k8s-test/` | `nebula-studio.nebula.svc.cluster.local:7001` (path-graph) |
 | NebulaGraph graphd | — | `nebula-console -addr <NODE_IP> -port <NodePort> -u root -p nebula` | `nebula-graphd-svc.nebula.svc.cluster.local:9669` (path-graph) |
 
-**Ingress routing:** HTTP apps use host `*.k8s-test` rules in [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml) (Qdrant/Studio routes in [path-graph](../path-graph/deploy/k8s/infra/manifests/ingress-routes.yaml)). TLS terminates on ingress-nginx **:443** using secret `ingress-nginx/k8s-test-tls` ([`scripts/sync-k8s-test-tls-secret.sh`](scripts/sync-k8s-test-tls-secret.sh)). Qdrant gRPC (`6334`) and PostgreSQL (`5432`) use **TCP stream** passthrough (not HTTPS).
+**Ingress routing:** HTTP apps use host `*.k8s-test` rules in [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml). NebulaGraph Studio routes, when needed, are managed by the sibling [path-graph](../path-graph) repo. TLS terminates on ingress-nginx **:443** using secret `ingress-nginx/k8s-test-tls` ([`scripts/sync-k8s-test-tls-secret.sh`](scripts/sync-k8s-test-tls-secret.sh)). PostgreSQL (`5432`) uses **TCP stream** passthrough (not HTTPS). Qdrant is no longer exposed by `k8s-test`.
 
 Ingress definitions: [`manifests/apps/ingress-routes.yaml`](manifests/apps/ingress-routes.yaml) (Git: [`helm/charts/git-http-server`](helm/charts/git-http-server)). Controller values: [`helm/values/ingress-nginx.yaml`](helm/values/ingress-nginx.yaml).
 
@@ -685,11 +679,11 @@ Official docs cite ~512MB minimum / 1GB recommended for the whole stack; communi
 flowchart LR
   subgraph ingest [Indexing]
     Docs[Documents / chunks] --> TEI[BGE-M3 TEI CPU]
-    TEI --> Qdrant[(Qdrant)]
+    TEI --> Store[(External vector store)]
   end
   subgraph query [RAG query]
     Q[User question] --> TEI2[BGE-M3 TEI]
-    TEI2 --> Search[Qdrant search]
+    TEI2 --> Search[Vector search]
     Search --> Ctx[Retrieved context]
     Ctx --> LLM[SGLang Gemma 4 12B]
     LLM --> Ans[Answer]
@@ -702,7 +696,7 @@ flowchart LR
 | Deployment | `bge-m3-tei` (1 replica) |
 | Image | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9` |
 | Model | `BAAI/bge-m3` |
-| Vector size | **1024** (cosine distance in Qdrant) |
+| Vector size | **1024** embeddings from BGE-M3 |
 | External host | `embeddings.k8s-test` (HTTPS :443) |
 | In-cluster base URL | `http://bge-m3-tei.llm-serving.svc.cluster.local:8080` |
 | OpenAI path | `/v1/embeddings` |
@@ -776,10 +770,7 @@ env:
     value: "http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1"
   - name: EMBEDDING_MODEL
     value: "BAAI/bge-m3"
-  - name: QDRANT_URL
-    value: "http://qdrant.qdrant.svc.cluster.local:6333"
-  - name: QDRANT_API_KEY
-    value: "test-qdrant-api-key"
+  # Configure your vector store separately; Qdrant is not deployed by this repo.
   - name: OPENAI_API_BASE
     value: "http://sglang-gemma4-12b.llm-serving.svc.cluster.local:30000/v1"
 ```
@@ -814,50 +805,11 @@ embeddings = OpenAIEmbeddings(
 vec = embeddings.embed_query("hello world")
 ```
 
-#### RAG example: TEI → Qdrant → SGLang
+#### RAG wiring note
 
-Create a Qdrant collection with **1024** dimensions (not 384):
+BGE-M3 TEI returns 1024-dimensional dense embeddings. Point RAG workloads at `EMBEDDING_BASE_URL=http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1`, then store/search those vectors in the vector database owned by the consuming application. `k8s-test` no longer deploys or exposes Qdrant, so Qdrant collection creation, API keys, and off-cluster Qdrant URLs belong in the owning application's repo/runbook, not here.
 
-```python
-from openai import OpenAI
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
-
-QDRANT_URL = "http://qdrant.qdrant.svc.cluster.local:6333"
-TEI_URL = "http://bge-m3-tei.llm-serving.svc.cluster.local:8080/v1"
-SGLANG_URL = "http://sglang-gemma4-12b.llm-serving.svc.cluster.local:30000/v1"
-COLLECTION = "rag-demo"
-
-qdrant = QdrantClient(url=QDRANT_URL, api_key="test-qdrant-api-key")
-tei = OpenAI(base_url=TEI_URL, api_key="not-needed")
-llm = OpenAI(base_url=SGLANG_URL, api_key="not-needed")
-
-qdrant.recreate_collection(
-    collection_name=COLLECTION,
-    vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
-)
-
-chunks = ["Kubernetes schedules pods onto nodes.", "Qdrant stores dense vectors for search."]
-for i, text in enumerate(chunks):
-    emb = tei.embeddings.create(model="BAAI/bge-m3", input=text).data[0].embedding
-    qdrant.upsert(collection_name=COLLECTION, points=[PointStruct(id=i, vector=emb, payload={"text": text})])
-
-question = "How does scheduling work?"
-q_vec = tei.embeddings.create(model="BAAI/bge-m3", input=question).data[0].embedding
-hits = qdrant.search(collection_name=COLLECTION, query_vector=q_vec, limit=2)
-context = "\n".join(h.payload["text"] for h in hits)
-
-answer = llm.chat.completions.create(
-    model="nmilosev/gemma-4-12B-it-quantized.w4a16",
-    messages=[
-        {"role": "system", "content": "Answer using the context only."},
-        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
-    ],
-)
-print(answer.choices[0].message.content)
-```
-
-Off-cluster: replace URLs with `https://embeddings.k8s-test/v1`, `https://qdrant.k8s-test`, `https://sglang.k8s-test/v1`.
+Off-cluster: use `https://embeddings.k8s-test/v1` for embeddings and `https://sglang.k8s-test/v1` for LLM completions.
 
 #### Port-forward (no ingress)
 
@@ -889,27 +841,14 @@ kubectl logs -n llm-serving deploy/bge-m3-tei --tail=50
 
 Recovery runbook: [BGE-M3 TEI startup slow / OOM / high CPU](#bge-m3-tei-startup-slow--oom--high-cpu).
 
-### Qdrant · NebulaGraph (path-graph)
+### NebulaGraph / path-graph
 
-Qdrant and NebulaGraph **install/operate** in the [path-graph](../path-graph) repo (`deploy/k8s/infra/`).
+NebulaGraph and graph/pipeline-specific infrastructure are managed outside this repo by the sibling [path-graph](../path-graph) repo. Qdrant is no longer part of the `k8s-test` operating target: the live cluster is expected to have no `qdrant` namespace, Qdrant PVC, or `qdrant.k8s-test` ingress unless another project explicitly deploys it.
 
-```bash
-cd ../path-graph
-make test-infra-config
-make deploy-qdrant-nebula
-make verify-qdrant-nebula
-```
-
-Runbook: [path-graph deploy/SETUP.md](../path-graph/deploy/SETUP.md#qdrant--nebulagraph).
-
-When pairing with [BGE-M3 TEI](#bge-m3-embeddings-cpu-tei), create Qdrant collections with **`size=1024`** and `Distance.COSINE`.
-
-| Item | In-cluster |
-| -------- | ---------- |
-| Qdrant REST | `http://qdrant.qdrant.svc.cluster.local:6333` |
-| Qdrant external | `https://qdrant.k8s-test/` (api-key; UI `/dashboard`) |
-| Nebula graphd | `nebula-graphd-svc.nebula.svc.cluster.local:9669` (`root` / `nebula`) |
-| Nebula Studio | `https://nebula-studio.k8s-test/` |
+| Item | In-cluster / external |
+| -------- | --------------------- |
+| Nebula graphd | `nebula-graphd-svc.nebula.svc.cluster.local:9669` when path-graph deploys Nebula |
+| Nebula Studio | `https://nebula-studio.k8s-test/` when path-graph deploys its ingress |
 
 ### Git HTTPS server
 

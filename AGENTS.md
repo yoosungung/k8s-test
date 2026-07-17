@@ -63,12 +63,11 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | `FailedScheduling` + `untolerated taint` | Node `DiskPressure` → `node.kubernetes.io/disk-pressure:NoSchedule` | `kubectl describe node <node> \| grep -E 'Taints|DiskPressure'` |
 | `ErrImageNeverPull` on `git-http-server:local` | Image not on k3s node (often after disk cleanup) | In-cluster Kaniko job or `scripts/build-git-http-server-image.sh` |
 | `ImagePullBackOff` on SGLang | Registry rate limit or concurrent pulls | Scale deployment to 0, pre-pull on node with `k3s ctr images pull`, scale back |
-| NebulaGraph PVC `Pending` / `nc` not `READY` | path-graph deploy pending or disk-pressure | path-graph: `make deploy-qdrant-nebula`; see path-graph SETUP |
-| Qdrant PVC `Pending` / `qdrant-0` not `Running` | path-graph deploy pending or disk-pressure | path-graph: `make deploy-qdrant-nebula`; see path-graph SETUP |
+| NebulaGraph PVC `Pending` / `nc` not `READY` | path-graph deploy pending or disk-pressure | Check the sibling path-graph repo/runbook; Nebula is not managed by this repo |
 | BGE-M3 TEI `connection refused` on `/health` | First boot model download (~1.1 GB) or CPU overload on bulk embed | `kubectl logs -n llm-serving deploy/bge-m3-tei`; `./scripts/verify-bge-m3-tei.sh`; see README → BGE-M3 TEI |
 | Leantime setup resets / `OOMKilled` | Image PHP-FPM defaults (`1G`×50 workers) exceed Pod limit | `kubectl describe pod -n leantime -l app.kubernetes.io/name=leantime`; see README → Leantime → PHP-FPM tuning |
 | `502` on `leantime.k8s-test/files/browse` | `browse.blade.php` `$module`/`$action` + menu `@include` / `get_defined_vars` OOM | README → Leantime → `/files/browse` patch; `./scripts/test-leantime-files-browse-fix.sh` |
-| `404` on `qdrant.k8s-test` / `nebula-studio.k8s-test` | path-graph ingress not applied or wrong Host | path-graph: `make deploy-qdrant-nebula`; access `https://qdrant.k8s-test/` / `https://nebula-studio.k8s-test/` |
+| `404` on `nebula-studio.k8s-test` | path-graph ingress not applied or wrong Host | Check the sibling path-graph repo/runbook; `qdrant.k8s-test` is not expected in `k8s-test` |
 | Hermes API `:8642` refused / `Gateway already running` | Stuck `hermes gateway restart` holds PID lock | `hermes gateway stop` in `hermes-master-0`; see README → Hermes gateway / API |
 | Hermes dashboard `502` / `:9119` refused | Missing `HERMES_DASHBOARD_BASIC_AUTH_*` after image upgrade | Patch `hermes-gateway-secrets` + rollout STS; see README → Hermes dashboard 502 |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
