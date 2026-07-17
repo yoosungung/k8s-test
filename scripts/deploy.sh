@@ -69,6 +69,18 @@ apply_hermes_gateway_secret() {
     local naver_client_id="${7:-${NAVER_CLIENT_ID:-REPLACE_WITH_NAVER_CLIENT_ID}}"
     local naver_client_secret="${8:-${NAVER_CLIENT_SECRET:-REPLACE_WITH_NAVER_CLIENT_SECRET}}"
     local hf_token="${9:-${HF_TOKEN:-REPLACE_WITH_HF_TOKEN}}"
+    local dash_user="${10:-${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-admin}}"
+    local dash_pass="${11:-${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}}"
+    local dash_secret="${12:-${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}}"
+
+    if [ -z "${dash_pass}" ]; then
+        dash_pass="$(openssl rand -base64 24 2>/dev/null || date +%s | shasum -a 256 | cut -c1-24)"
+        log_info "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD not set; generated a new password."
+    fi
+    if [ -z "${dash_secret}" ]; then
+        dash_secret="$(openssl rand -base64 32 2>/dev/null || date +%s | shasum -a 256 | cut -c1-32)"
+        log_info "HERMES_DASHBOARD_BASIC_AUTH_SECRET not set; generated a new secret."
+    fi
 
     kubectl create secret generic "${HERMES_SECRET_NAME}" \
         --namespace "${HERMES_NAMESPACE}" \
@@ -81,7 +93,33 @@ apply_hermes_gateway_secret() {
         --from-literal=NAVER_CLIENT_ID="${naver_client_id}" \
         --from-literal=NAVER_CLIENT_SECRET="${naver_client_secret}" \
         --from-literal=HF_TOKEN="${hf_token}" \
+        --from-literal=HERMES_DASHBOARD_BASIC_AUTH_USERNAME="${dash_user}" \
+        --from-literal=HERMES_DASHBOARD_BASIC_AUTH_PASSWORD="${dash_pass}" \
+        --from-literal=HERMES_DASHBOARD_BASIC_AUTH_SECRET="${dash_secret}" \
         --dry-run=client -o yaml | kubectl apply -f -
+}
+
+ensure_hermes_dashboard_auth_secret_keys() {
+    # Existing clusters may predate dashboard basic-auth; patch missing keys in place.
+    if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &>/dev/null; then
+        return 0
+    fi
+    local need=0
+    for key in HERMES_DASHBOARD_BASIC_AUTH_USERNAME HERMES_DASHBOARD_BASIC_AUTH_PASSWORD HERMES_DASHBOARD_BASIC_AUTH_SECRET; do
+        if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" -o jsonpath="{.data.${key}}" 2>/dev/null | grep -q .; then
+            need=1
+            break
+        fi
+    done
+    if [ "${need}" -eq 0 ]; then
+        return 0
+    fi
+    log_info "Patching ${HERMES_SECRET_NAME} with missing Hermes dashboard basic-auth keys..."
+    local dash_user="${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-admin}"
+    local dash_pass="${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-$(openssl rand -base64 24 2>/dev/null || date +%s | shasum -a 256 | cut -c1-24)}"
+    local dash_secret="${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-$(openssl rand -base64 32 2>/dev/null || date +%s | shasum -a 256 | cut -c1-32)}"
+    kubectl patch secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" --type merge -p "{\"stringData\":{\"HERMES_DASHBOARD_BASIC_AUTH_USERNAME\":\"${dash_user}\",\"HERMES_DASHBOARD_BASIC_AUTH_PASSWORD\":\"${dash_pass}\",\"HERMES_DASHBOARD_BASIC_AUTH_SECRET\":\"${dash_secret}\"}}"
+    log_info "Dashboard login user: ${dash_user} (password stored in secret key HERMES_DASHBOARD_BASIC_AUTH_PASSWORD)"
 }
 
 generate_hermes_api_server_key() {
@@ -488,6 +526,7 @@ if ! kubectl get secret "${HERMES_SECRET_NAME}" -n "${HERMES_NAMESPACE}" &> /dev
 else
     log_info "${HERMES_SECRET_NAME} already exists in '${HERMES_NAMESPACE}' namespace."
 fi
+ensure_hermes_dashboard_auth_secret_keys
 
 # 3.7 Set up Hermes auth secrets if needed
 log_info "Checking Hermes auth secrets..."

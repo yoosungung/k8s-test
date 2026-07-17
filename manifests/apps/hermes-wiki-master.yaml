@@ -103,9 +103,22 @@ spec:
               value: "0.0.0.0"
             - name: HERMES_DASHBOARD_PORT
               value: "9119"
-            # Required when binding dashboard to non-loopback without OAuth provider
-            - name: HERMES_DASHBOARD_INSECURE
-              value: "1"
+            # Non-loopback bind requires a DashboardAuthProvider (INSECURE is ignored since June 2026).
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-gateway-secrets
+                  key: HERMES_DASHBOARD_BASIC_AUTH_SECRET
             - name: HERMES_INFERENCE_MODEL
               value: "gpt-5.5"
             - name: HERMES_INFERENCE_PROVIDER

@@ -92,6 +92,10 @@ spec:
             mountPath: /var/www/html/app/Domain/Files/Templates/browse.blade.php
             subPath: browse.blade.php
             readOnly: true
+          - name: app-patch
+            mountPath: /var/www/html/app/Domain/Tickets/Controllers/NewTicket.php
+            subPath: NewTicket.php
+            readOnly: true
           {{- end }}
           env:
           - name: LEAN_DB_HOST

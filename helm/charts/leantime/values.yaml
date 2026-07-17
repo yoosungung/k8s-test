@@ -53,7 +53,7 @@ app:
   url: ""
   patch:
     filesBrowseFix:
-      # -- Mount k8s-test blade patches (isolated view() for /files/browse OOM)
+      # -- Mount k8s-test patches (files/browse OOM blades + NewTicket POST ticketParents)
       enabled: false
   s3:
     # -- Set to true if you want to use S3 instead of local files

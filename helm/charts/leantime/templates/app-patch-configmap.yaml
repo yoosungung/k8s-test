@@ -26,4 +26,7 @@ data:
 {{ .Files.Get "patches/app/Domain/Files/Templates/showAll.blade.php" | nindent 4 }}
   browse.blade.php: |
 {{ .Files.Get "patches/app/Domain/Files/Templates/browse.blade.php" | nindent 4 }}
+  # indent (not nindent): leading newline before <?php breaks PHP namespace parse
+  NewTicket.php: |
+{{ .Files.Get "patches/app/Domain/Tickets/Controllers/NewTicket.php" | indent 4 }}
 {{- end }}

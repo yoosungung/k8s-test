@@ -31,10 +31,10 @@ app:
     expiration: 480
   email:
     enabled: true
-    return: "dulle2@gmail.com"
+    return: "leantime.send@gmail.com"
     smtp:
       hosts: "smtp.gmail.com"
-      username: "dulle2@gmail.com"
+      username: "leantime.send@gmail.com"
       existingSecret: leantime-smtp
       secretKey: password
       port: 587

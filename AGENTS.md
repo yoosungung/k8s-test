@@ -70,6 +70,7 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | `502` on `leantime.k8s-test/files/browse` | `browse.blade.php` `$module`/`$action` + menu `@include` / `get_defined_vars` OOM | README → Leantime → `/files/browse` patch; `./scripts/test-leantime-files-browse-fix.sh` |
 | `404` on `qdrant.k8s-test` / `nebula-studio.k8s-test` | path-graph ingress not applied or wrong Host | path-graph: `make deploy-qdrant-nebula`; access `https://qdrant.k8s-test/` / `https://nebula-studio.k8s-test/` |
 | Hermes API `:8642` refused / `Gateway already running` | Stuck `hermes gateway restart` holds PID lock | `hermes gateway stop` in `hermes-master-0`; see README → Hermes gateway / API |
+| Hermes dashboard `502` / `:9119` refused | Missing `HERMES_DASHBOARD_BASIC_AUTH_*` after image upgrade | Patch `hermes-gateway-secrets` + rollout STS; see README → Hermes dashboard 502 |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
 
 Before destructive cluster-wide cleanup (`--field-selector`, force-delete all namespaces), prefer **targeted** pod deletes in the affected namespace only.

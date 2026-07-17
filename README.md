@@ -172,10 +172,23 @@ For Hermes agents, you can provide secrets via environment variables (non-intera
 export DISCORD_BOT_TOKEN='your-discord-bot-token'
 export OPENAI_API_KEY='your-openai-api-key'
 export HERMES_API_SERVER_KEY="$(openssl rand -hex 32)"   # optional: auto-generated if omitted in prompts
+# Dashboard auth (required for https://hermes.k8s-test/ after Hermes ≥ mid-2026; INSECURE ignored):
+# export HERMES_DASHBOARD_BASIC_AUTH_USERNAME='admin'
+# export HERMES_DASHBOARD_BASIC_AUTH_PASSWORD='choose-a-strong-password'
+# export HERMES_DASHBOARD_BASIC_AUTH_SECRET="$(openssl rand -base64 32)"
 # optional:
 # export DISCORD_ALLOWED_USERS='your-discord-username'
 
 ./scripts/deploy.sh
+```
+
+Retrieve generated dashboard credentials:
+
+```bash
+kubectl get secret hermes-gateway-secrets -n ai-agents \
+  -o jsonpath='{.data.HERMES_DASHBOARD_BASIC_AUTH_USERNAME}' | base64 -d; echo
+kubectl get secret hermes-gateway-secrets -n ai-agents \
+  -o jsonpath='{.data.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD}' | base64 -d; echo
 ```
 
 ### Clean Up / Teardown
@@ -191,6 +204,27 @@ To remove all components and clean up the namespaces created for testing:
 ## Recovery & troubleshooting
 
 Runbooks for common failures on the single-node k3s test cluster (`didim-gpu`). After fixing the root cause, workloads usually reconcile within **a few minutes**; image-related failures need extra steps below.
+
+### Telepresence intercept timeout on `runtime` pool workloads
+
+**Symptoms**
+
+```text
+telepresence intercept: connector.CreateIntercept: context deadline exceeded
+```
+
+Pod shows `1/2 Running`; `traffic-agent` logs repeat `dial tcp ...:8081: connect: connection refused`.
+
+**Cause:** `pool-egress` NetworkPolicy (`manifests/infra/runtime-pool-network-policies.yaml`) blocks pool pods (`runtime/role=pool`) from reaching Telepresence Traffic Manager in `ambassador` on port **8081**.
+
+**Fix**
+
+```bash
+kubectl apply -f manifests/infra/runtime-pool-network-policies.yaml
+kubectl rollout restart deployment/agent-pool-compiled-graph -n runtime
+# Re-run intercept after the new pod is Ready
+telepresence intercept agent-pool-compiled-graph --port 8080:8080
+```
 
 ### Hermes gateway / API (`:8642`) stuck
 
@@ -215,6 +249,34 @@ kubectl exec -n ai-agents hermes-master-0 -- sh -c \
 ```
 
 Expect `argv` containing `gateway run`, `api_server: connected`, and HTTP 200 from `/v1/models`.
+
+### Hermes dashboard `502` on `hermes.k8s-test` (auth gate)
+
+**Symptoms**
+
+- `https://hermes.k8s-test/` → `502 Bad Gateway`
+- Ingress nginx: `connect() failed (111: Connection refused)` to `…:9119`
+- In-pod: dashboard crash-loops; log says `Refusing to bind dashboard to 0.0.0.0 — … no auth providers are registered`
+- `HERMES_DASHBOARD_INSECURE=1` no longer disables the gate (June 2026 hardening)
+
+**Cause:** Newer `nousresearch/hermes-agent` requires a `DashboardAuthProvider` for non-loopback binds. This cluster uses basic auth via `hermes-gateway-secrets` (`HERMES_DASHBOARD_BASIC_AUTH_*`) wired in [`manifests/apps/hermes-master.yaml`](manifests/apps/hermes-master.yaml).
+
+**Fix**
+
+```bash
+# Ensure secret keys exist (deploy.sh also patches missing keys):
+./scripts/deploy.sh   # or patch secret keys manually, then:
+kubectl apply -f manifests/apps/hermes-master.yaml
+kubectl apply -f manifests/apps/hermes-wiki-master.yaml
+kubectl rollout restart sts/hermes-master sts/hermes-wiki-master -n ai-agents
+kubectl rollout status sts/hermes-master -n ai-agents --timeout=300s
+
+# Verify dashboard is listening:
+kubectl exec -n ai-agents hermes-master-0 -- curl -sS -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9119/
+# Expect 200 or 302 (login), not connection refused
+```
+
+Login at `https://hermes.k8s-test/` with the username/password from `hermes-gateway-secrets` (see Deploy secrets section above).
 
 ### Node disk pressure (`FailedScheduling` / untolerated taint)
 

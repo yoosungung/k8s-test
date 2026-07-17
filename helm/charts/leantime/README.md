@@ -25,6 +25,10 @@ Create a `values.yaml` file to override the default configurations. For convenie
 helm install leantime -f values.yaml ./leantime/helm
 ```
 
+# k8s-test app patches
+
+When `app.patch.filesBrowseFix.enabled` is true, the chart mounts overlays from `patches/` over Leantime core files (menu/files blade OOM fixes, and **NewTicket POST parents assign** so validation failure re-renders with `$ticketParents` instead of 500).
+
 # Configuring
 
 | Key | Type | Default | Description |
