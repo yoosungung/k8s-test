@@ -352,6 +352,22 @@ kubectl delete pod -n opik \
 
 Prefer **per-namespace, per-pod** deletes. Avoid cluster-wide force-delete unless you know every affected workload.
 
+### path-graph Argo leftover ImagePullBackOff
+
+Stale Argo probe/test Workflows in `path-graph` can leave `*-resolve-manifest-*` pods in `ImagePullBackOff` on `path-graph/pipeline:0.0.0` for weeks. Pods are owned by `Workflow/<name>`; deleting pods alone recreates them. `filestash` may still be Ready.
+
+```bash
+# Identify stuck owners
+kubectl get pods -n path-graph | grep ImagePullBackOff
+kubectl get workflow -n path-graph | awk 'NR==1 || /Running/'
+
+# Delete the stuck Workflows (cascade removes pods). Do not delete filestash.
+kubectl delete workflow -n path-graph <wf1> <wf2> ...
+kubectl get pods -n path-graph   # expect no ImagePullBackOff; filestash Running
+```
+
+Managed outside this repo (sibling path-graph); k8s-test only documents recovery. See Leantime #41.
+
 ### git-http-server image missing (`ErrImageNeverPull`)
 
 Chart uses `git-http-server:local` with `imagePullPolicy: Never`. The image must exist in k3s containerd on the node. Disk cleanup often removes it.
