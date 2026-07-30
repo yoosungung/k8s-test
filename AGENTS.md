@@ -71,5 +71,6 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | Hermes API `:8642` refused / `Gateway already running` | Stuck `hermes gateway restart` holds PID lock | `hermes gateway stop` in `hermes-master-0`; see README → Hermes gateway / API |
 | Hermes dashboard `502` / `:9119` refused | Missing `HERMES_DASHBOARD_BASIC_AUTH_*` after image upgrade | Patch `hermes-gateway-secrets` + rollout STS; see README → Hermes dashboard 502 |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
+| path-graph `*-resolve-manifest-*` `ImagePullBackOff` on `pipeline:0.0.0` | Stuck Argo probe/test Workflows (pod owned by Workflow) | `kubectl delete workflow -n path-graph <names>` — not pod-only; keep filestash; see README → path-graph Argo leftover |
 
 Before destructive cluster-wide cleanup (`--field-selector`, force-delete all namespaces), prefer **targeted** pod deletes in the affected namespace only.
