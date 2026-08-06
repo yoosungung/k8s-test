@@ -7,6 +7,7 @@ DEPLOY="${SGLANG_DEPLOY:-sglang-gemma4-12b}"
 SGLANG_MODEL="${SGLANG_MODEL:-nmilosev/gemma-4-12B-it-quantized.w4a16}"
 MIN_REPLICAS="${SGLANG_MIN_REPLICAS:-2}"
 MIN_MAX_TOTAL_TOKENS="${SGLANG_MIN_MAX_TOTAL_TOKENS:-8192}"
+MIN_CONTEXT_LENGTH="${SGLANG_MIN_CONTEXT_LENGTH:-32768}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -38,6 +39,20 @@ echo "Sample pod: ${pod}"
 echo ""
 echo "=== Launch args (context-length, tp/dp, cuda-graph) ==="
 kubectl get deploy "${DEPLOY}" -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].command}' | python3 -m json.tool
+
+echo ""
+echo "=== Effective max_model_len (API) ==="
+models_json="$(kubectl exec -n "${NAMESPACE}" "${pod}" -- curl -sf http://127.0.0.1:30000/v1/models 2>/dev/null || true)"
+if [ -z "${models_json}" ]; then
+  fail "Could not GET /v1/models from pod ${pod}"
+fi
+max_model_len="$(echo "${models_json}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data'][0].get('max_model_len') or 0)")"
+echo "max_model_len=${max_model_len}"
+if [ "${max_model_len}" -ge "${MIN_CONTEXT_LENGTH}" ]; then
+  ok "max_model_len=${max_model_len} (>= ${MIN_CONTEXT_LENGTH})"
+else
+  fail "max_model_len=${max_model_len} is below ${MIN_CONTEXT_LENGTH} (raise --context-length)"
+fi
 
 echo ""
 echo "=== Startup memory / KV pool (from logs) ==="
