@@ -42,7 +42,8 @@ spec:
           exec sglang serve \
             --model-path nmilosev/gemma-4-12B-it-quantized.w4a16 \
             --mem-fraction-static 0.75 \
-            --context-length 32768 \
+            --context-length 40960 \
+            --kv-cache-dtype fp8_e4m3 \
             --reasoning-parser gemma4 \
             --tool-call-parser gemma4 \
             --host 0.0.0.0 \

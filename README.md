@@ -1020,7 +1020,7 @@ For in-pod `postgresql.conf` / `pg_hba.conf` edits, Hermes uses existing `pods/e
 
 ### SGLang context / KV pool
 
-**Gemma 4 12B** (`manifests/apps/sglang-gemma4-12b.yaml`, 1×4090 per replica): effective limit is SGLang `--context-length` (not the model’s ~256K). Default in-cluster target is **32768** so agent prompts ~18k tokens (e.g. Spider2 / #172 overflow at 16384) succeed. Confirm with `curl …/v1/models` → `max_model_len` and `./scripts/verify-sglang.sh` (`SGLANG_MIN_CONTEXT_LENGTH`, default 32768). Raising further (e.g. 65536 + `--kv-cache-dtype fp8_e4m3`) needs VRAM/`max_total_num_tokens` headroom after rollout.
+**Gemma 4 12B** (`manifests/apps/sglang-gemma4-12b.yaml`, 1×4090 per replica): effective limit is SGLang `--context-length` (not the model’s ~256K). Default in-cluster target is **40960** with `--kv-cache-dtype fp8_e4m3` so agent prompts that overflowed 32768 (e.g. Spider2 ~31.5k input + completion reserve, #262) succeed while KV pool stays above `context-length` on 24GB. Confirm with `curl …/v1/models` → `max_model_len` and `./scripts/verify-sglang.sh` (`SGLANG_MIN_CONTEXT_LENGTH`, default 40960). Raising further (e.g. 65536) still needs VRAM/`max_total_num_tokens` headroom after rollout — without fp8 KV, 32K already sat at `max_total_num_tokens≈34746`.
 
 Gemma 4 31B on 2×4090: **`--context-length 16384` alone is not enough**. SGLang sizes the KV pool from free VRAM after weights. With **`dp-size=2`**, each GPU loads a full copy of the model, so startup logs often show `max_total_num_tokens≈3800` and requests log `Truncated` / `max_req_input_len=3826` even though `context_len=16384`.
 
