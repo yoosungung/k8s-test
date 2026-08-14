@@ -20,14 +20,15 @@ primary:
   service:
     type: ClusterIP
 
-  # Resource configurations tailored for lightweight local test environments
+  # Shared hermesdb + spider2db: 512Mi cgroup killed Full EX backends (SIGKILL).
+  # Ticket #775: limit 4Gi / request 2Gi. If the pod cannot schedule, drop to 2Gi/1Gi.
   resources:
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 4Gi
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 2Gi
 
   # Persistent Volume configurations
   persistence:
