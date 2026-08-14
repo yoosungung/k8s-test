@@ -435,6 +435,27 @@ kubectl rollout status deploy -n llm-serving sglang-gemma4-12b --timeout=30m
 
 Manifest uses `imagePullPolicy: IfNotPresent`, so a successful node pull is reused by new pods.
 
+### PostgreSQL backend SIGKILL / `server closed the connection unexpectedly`
+
+**Symptoms**
+
+- Spider2 Full EX / heavy SQL: `server closed the connection unexpectedly`
+- `kubectl -n postgres logs postgresql-0` shows `client backend … terminated by signal 9: Killed`, then postmaster terminates other backends and recovers
+- Pod `Restart` stays `0` (cgroup OOM kills a child backend, not the container)
+
+**Cause:** Shared `postgresql-0` memory **limit 512Mi** is too small for Full EX on `hermesdb` + `spider2db`. Do **not** set a cluster-wide `statement_timeout` (cuts healthy Hermes queries too).
+
+**Fix:** [`helm/values/postgresql.yaml`](helm/values/postgresql.yaml) `primary.resources` **limit 4Gi / request 2Gi**. Validate with `./scripts/test-postgresql-resources.sh`. Apply via `./scripts/deploy.sh` (Helm) or patch the live STS if `helm` is unavailable, then confirm:
+
+```bash
+./scripts/test-postgresql-resources.sh
+kubectl -n postgres get pod postgresql-0 -o jsonpath='{.spec.containers[0].resources}{"\n"}'
+# expect limits.memory=4Gi requests.memory=2Gi
+kubectl -n postgres wait --for=condition=Ready pod/postgresql-0 --timeout=180s
+```
+
+If the pod cannot schedule, drop to **2Gi / 1Gi** and record the reason on the incident ticket. Node `didim-gpu` currently has headroom (~9% requests / ~31% limits of ~125Gi).
+
 ### Recovery checklist (quick)
 
 | Workload | Ready check | If not healthy |
@@ -443,7 +464,7 @@ Manifest uses `imagePullPolicy: IfNotPresent`, so a successful node pull is reus
 | Hermes | `kubectl get sts -n ai-agents hermes-master` | Wait for init; check secrets |
 | Opik | `kubectl get deploy -n opik` | Wait for init images; delete stale pods |
 | ingress-nginx | `kubectl get deploy -n ingress-nginx` | Delete unknown pods; helm upgrade if ports stuck |
-| postgresql | `kubectl get sts -n postgres` | Wait for PVC; check evicted pods |
+| postgresql | `kubectl get sts -n postgres` | Wait for PVC; SIGKILL backends → [memory 4Gi](#postgresql-backend-sigkill--server-closed-the-connection-unexpectedly) |
 | SGLang | `2/2` in `llm-serving` | Pre-pull image (above) |
 | BGE-M3 TEI | `1/1` in `llm-serving` | `./scripts/verify-bge-m3-tei.sh`; first start downloads ~1.1 GB model |
 | git-http-server | `1/1` in `git` | Rebuild/import image (above) |
@@ -994,6 +1015,8 @@ Defined in `[helm/values/postgresql.yaml](helm/values/postgresql.yaml)`:
 | `postgres` | *(admin)*  | `adminpassword`  |
 
 
+Shared instance (`ns postgres`, release `postgresql`) also hosts **`spider2db`**. Pod memory is **limit 4Gi / request 2Gi** in [`helm/values/postgresql.yaml`](helm/values/postgresql.yaml) (was 512Mi/256Mi; Full EX SIGKILL — see [PostgreSQL backend SIGKILL](#postgresql-backend-sigkill--server-closed-the-connection-unexpectedly)). Gate: `./scripts/test-postgresql-resources.sh`.
+
 The `hermesdb` database is initialized with the **pgvector** extension.
 
 ```bash
@@ -1065,6 +1088,7 @@ chmod +x scripts/verify-sglang.sh
 | `teardown.sh` | Remove test resources |
 | `test-bge-m3-tei-config.sh` | Pre-deploy TEI manifest validation |
 | `test-leantime-config.sh` | Pre-deploy Leantime chart/ingress/MCP validation |
+| `test-postgresql-resources.sh` | PostgreSQL Helm memory gate (4Gi / 2Gi) |
 | `sync-leantime-chart.sh` | Vendor upstream Leantime Helm chart (v3.9.7) |
 | `verify-bge-m3-tei.sh` | Post-deploy BGE-M3 TEI checks |
 | `verify-leantime.sh` | Post-deploy Leantime + MCP setup hints |
