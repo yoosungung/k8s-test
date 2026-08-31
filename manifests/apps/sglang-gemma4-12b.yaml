@@ -8,7 +8,8 @@ metadata:
   labels:
     app.kubernetes.io/name: sglang-gemma4-12b
 spec:
-  replicas: 2
+  # Default off while 31B (tp=2) owns both GPUs. Scale to 2 only after 31B is at 0.
+  replicas: 0
   # maxSurge=0: 2-GPU node cannot host a 3rd pod during rollout.
   strategy:
     type: RollingUpdate

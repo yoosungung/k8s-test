@@ -465,7 +465,7 @@ If the pod cannot schedule, drop to **2Gi / 1Gi** and record the reason on the i
 | Opik | `kubectl get deploy -n opik` | Wait for init images; delete stale pods |
 | ingress-nginx | `kubectl get deploy -n ingress-nginx` | Delete unknown pods; helm upgrade if ports stuck |
 | postgresql | `kubectl get sts -n postgres` | Wait for PVC; SIGKILL backends → [memory 4Gi](#postgresql-backend-sigkill--server-closed-the-connection-unexpectedly) |
-| SGLang | `2/2` in `llm-serving` | Pre-pull image (above) |
+| SGLang | `1/1` `sglang-gemma4-31b` (12B at 0) | Pre-pull image; free both GPUs before apply |
 | BGE-M3 TEI | `1/1` in `llm-serving` | `./scripts/verify-bge-m3-tei.sh`; first start downloads ~1.1 GB model |
 | git-http-server | `1/1` in `git` | Rebuild/import image (above) |
 | Leantime | `1/1` in `leantime` | `./scripts/verify-leantime.sh`; first boot → `/install` |
@@ -493,7 +493,7 @@ Add to `/etc/hosts`:
 | Leantime PM | `leantime.k8s-test` | `https://leantime.k8s-test/` | `leantime.leantime.svc.cluster.local:80` |
 | Hermes dashboard | `hermes.k8s-test` | `https://hermes.k8s-test/` | `hermes-master.ai-agents.svc.cluster.local:9119` |
 | Hermes API | `hermes-api.k8s-test` | `https://hermes-api.k8s-test/` | `hermes-master.ai-agents.svc.cluster.local:8642` |
-| SGLang OpenAI | `sglang.k8s-test` | `https://sglang.k8s-test/v1/` | `sglang-gemma4-12b.llm-serving.svc.cluster.local:30000` |
+| SGLang OpenAI | `sglang.k8s-test` | `https://sglang.k8s-test/v1/` | `sglang-gemma4-31b.llm-serving.svc.cluster.local:30000` |
 | BGE-M3 TEI | `embeddings.k8s-test` | `https://embeddings.k8s-test/v1/embeddings` | `bge-m3-tei.llm-serving.svc.cluster.local:8080` |
 | Git HTTPS | `git.k8s-test` | `https://git.k8s-test/git/<repo>.git` | `git-http-server.git.svc.cluster.local/git/…` |
 | NebulaGraph Studio | `nebula-studio.k8s-test` | `https://nebula-studio.k8s-test/` | `nebula-studio.nebula.svc.cluster.local:7001` (path-graph) |
@@ -809,7 +809,7 @@ env:
     value: "BAAI/bge-m3"
   # Configure your vector store separately; Qdrant is not deployed by this repo.
   - name: OPENAI_API_BASE
-    value: "http://sglang-gemma4-12b.llm-serving.svc.cluster.local:30000/v1"
+    value: "http://sglang-gemma4-31b.llm-serving.svc.cluster.local:30000/v1"
 ```
 
 **OpenAI Python SDK:**
@@ -1043,7 +1043,9 @@ For in-pod `postgresql.conf` / `pg_hba.conf` edits, Hermes uses existing `pods/e
 
 ### SGLang context / KV pool
 
-**Gemma 4 12B** (`manifests/apps/sglang-gemma4-12b.yaml`, 1×4090 per replica): effective limit is SGLang `--context-length` (not the model’s ~256K). Default in-cluster target is **40960** with `--kv-cache-dtype fp8_e4m3` so agent prompts that overflowed 32768 (e.g. Spider2 ~31.5k input + completion reserve, #262) succeed while KV pool stays above `context-length` on 24GB. Confirm with `curl …/v1/models` → `max_model_len` and `./scripts/verify-sglang.sh` (`SGLANG_MIN_CONTEXT_LENGTH`, default 40960). Raising further (e.g. 65536) still needs VRAM/`max_total_num_tokens` headroom after rollout — without fp8 KV, 32K already sat at `max_total_num_tokens≈34746`.
+**Active default:** Gemma 4 **31B AWQ** on 2×4090 via [`manifests/apps/sglang-gemma4-31b.yaml`](manifests/apps/sglang-gemma4-31b.yaml) (`--tp-size 2`, `--dp-size 1`). Ingress `sglang.k8s-test` → Service `sglang-gemma4-31b`. The 12B deploy stays at **replicas=0** so both GPUs stay free ([`sglang-gemma4-12b.yaml`](manifests/apps/sglang-gemma4-12b.yaml)).
+
+**12B alternate** (1×4090 per replica): effective limit is SGLang `--context-length` (not the model’s ~256K). Target **40960** with `--kv-cache-dtype fp8_e4m3` so agent prompts that overflowed 32768 succeed while KV stays above `context-length` on 24GB. Confirm with `/v1/models` → `max_model_len` and `SGLANG_MIN_CONTEXT_LENGTH` (default 40960) in `./scripts/verify-sglang.sh`.
 
 Gemma 4 31B on 2×4090: **`--context-length 16384` alone is not enough**. SGLang sizes the KV pool from free VRAM after weights. With **`dp-size=2`**, each GPU loads a full copy of the model, so startup logs often show `max_total_num_tokens≈3800` and requests log `Truncated` / `max_req_input_len=3826` even though `context_len=16384`.
 
@@ -1058,13 +1060,27 @@ Recommended layout (see [SGLang hyperparameter tuning](https://sgl-project.githu
 | No **`--allow-auto-truncate`** | Avoid silent truncation ([SGLang #21136](https://github.com/sgl-project/sglang/issues/21136)). |
 | **`--tool-call-parser gemma4`** + **`--reasoning-parser gemma4`** | LangChain/deepagents need `message.tool_calls`, not raw `<\|tool_call>call:...` text in `content` ([Gemma 4 cookbook](https://docs.sglang.io/cookbook/autoregressive/Google/Gemma4)). Auto-detect in logs is not enough; the CLI flags must be set. |
 
-After deploy, confirm: `max_total_num_tokens` ≫ 8192, no `Truncated` in logs, and `./scripts/verify-sglang.sh` passes the tool-call probe.
+Switch 12B ↔ 31B (mutual exclusive on this node):
 
 ```bash
+# → 31B (default)
+kubectl scale deploy -n llm-serving sglang-gemma4-12b --replicas=0
 kubectl apply -f manifests/apps/sglang-gemma4-31b.yaml
-chmod +x scripts/verify-sglang.sh
+kubectl apply -f manifests/apps/ingress-routes.yaml   # backend sglang-gemma4-31b
+kubectl delete ingress -n llm-serving sglang-gemma4-12b --ignore-not-found
+kubectl rollout status deploy -n llm-serving sglang-gemma4-31b --timeout=30m
 ./scripts/verify-sglang.sh
+
+# → 12B
+kubectl scale deploy -n llm-serving sglang-gemma4-31b --replicas=0
+kubectl scale deploy -n llm-serving sglang-gemma4-12b --replicas=2
+# Point ingress backend to sglang-gemma4-12b, then:
+SGLANG_DEPLOY=sglang-gemma4-12b SGLANG_MIN_REPLICAS=2 \
+  SGLANG_MODEL=nmilosev/gemma-4-12B-it-quantized.w4a16 \
+  SGLANG_MIN_CONTEXT_LENGTH=40960 ./scripts/verify-sglang.sh
 ```
+
+After deploy, confirm: `max_total_num_tokens` ≫ 8192, no `Truncated` in logs, and `./scripts/verify-sglang.sh` passes the tool-call probe.
 
 ---
 

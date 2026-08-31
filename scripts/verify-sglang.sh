@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Post-deploy checks for SGLang (gemma-4-12B). See manifests/apps/sglang-gemma4-12b.yaml.
+# Post-deploy checks for SGLang (default: gemma-4-31B AWQ tp=2).
+# Override for 12B:
+#   SGLANG_DEPLOY=sglang-gemma4-12b SGLANG_MIN_REPLICAS=2 \
+#   SGLANG_MODEL=nmilosev/gemma-4-12B-it-quantized.w4a16 \
+#   SGLANG_MIN_CONTEXT_LENGTH=40960
 set -euo pipefail
 
 NAMESPACE="${SGLANG_NAMESPACE:-llm-serving}"
-DEPLOY="${SGLANG_DEPLOY:-sglang-gemma4-12b}"
-SGLANG_MODEL="${SGLANG_MODEL:-nmilosev/gemma-4-12B-it-quantized.w4a16}"
-MIN_REPLICAS="${SGLANG_MIN_REPLICAS:-2}"
+DEPLOY="${SGLANG_DEPLOY:-sglang-gemma4-31b}"
+SGLANG_MODEL="${SGLANG_MODEL:-QuantTrio/gemma-4-31B-it-AWQ}"
+MIN_REPLICAS="${SGLANG_MIN_REPLICAS:-1}"
 MIN_MAX_TOTAL_TOKENS="${SGLANG_MIN_MAX_TOTAL_TOKENS:-8192}"
-MIN_CONTEXT_LENGTH="${SGLANG_MIN_CONTEXT_LENGTH:-40960}"
+MIN_CONTEXT_LENGTH="${SGLANG_MIN_CONTEXT_LENGTH:-16384}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -90,12 +94,15 @@ fi
 echo ""
 echo "=== Tool calling (OpenAI tool_calls, not raw <|tool_call> text) ==="
 node_ip="${NODE_IP:-192.168.150.200}"
-ingress_port="${SGLANG_HTTP_PORT:-30000}"
+ingress_port="${SGLANG_HTTP_PORT:-443}"
+ingress_scheme="${SGLANG_INGRESS_SCHEME:-https}"
 sglang_host="${SGLANG_INGRESS_HOST:-sglang.k8s-test}"
-sglang_base="http://${node_ip}:${ingress_port}"
-tool_resp="$(curl -sf --max-time 120 "${sglang_base}/v1/chat/completions" \
-  -H "Host: ${sglang_host}" \
-  -H 'Content-Type: application/json' \
+sglang_base="${ingress_scheme}://${node_ip}:${ingress_port}"
+curl_opts=(-sf --max-time 120 -H "Host: ${sglang_host}" -H 'Content-Type: application/json')
+if [ "${ingress_scheme}" = https ]; then
+  curl_opts+=(--insecure)
+fi
+tool_resp="$(curl "${curl_opts[@]}" "${sglang_base}/v1/chat/completions" \
   -d "{
     \"model\": \"${SGLANG_MODEL}\",
     \"messages\": [{\"role\": \"user\", \"content\": \"List tables for adventureworks using search_tables.\"}],
@@ -116,8 +123,36 @@ tool_resp="$(curl -sf --max-time 120 "${sglang_base}/v1/chat/completions" \
     \"temperature\": 0.1
   }" 2>/dev/null || true)"
 if [ -z "${tool_resp}" ]; then
-  warn "Tool-call probe HTTP failed (server loading?)"
-else
+  # Fallback: in-pod localhost (ingress Host/DNS issues should not hide parser regressions).
+  tool_resp="$(kubectl exec -n "${NAMESPACE}" "deploy/${DEPLOY}" -- curl -sf --max-time 120 \
+    http://127.0.0.1:30000/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\": \"${SGLANG_MODEL}\",
+      \"messages\": [{\"role\": \"user\", \"content\": \"List tables for adventureworks using search_tables.\"}],
+      \"tools\": [{
+        \"type\": \"function\",
+        \"function\": {
+          \"name\": \"search_tables\",
+          \"description\": \"Search MDL tables\",
+          \"parameters\": {
+            \"type\": \"object\",
+            \"properties\": {\"query\": {\"type\": \"string\"}},
+            \"required\": [\"query\"]
+          }
+        }
+      }],
+      \"tool_choice\": \"auto\",
+      \"max_tokens\": 128,
+      \"temperature\": 0.1
+    }" 2>/dev/null || true)"
+  if [ -n "${tool_resp}" ]; then
+    warn "Ingress probe failed; used in-pod localhost for tool-call check"
+  else
+    warn "Tool-call probe HTTP failed (server loading?)"
+  fi
+fi
+if [ -n "${tool_resp}" ]; then
   echo "${tool_resp}" | python3 -c "
 import json, sys
 r = json.load(sys.stdin)
@@ -138,10 +173,15 @@ fi
 echo ""
 echo "=== /v1/models (optional) ==="
 node_ip="${NODE_IP:-192.168.150.200}"
-ingress_port="${SGLANG_HTTP_PORT:-30000}"
+ingress_port="${SGLANG_HTTP_PORT:-443}"
+ingress_scheme="${SGLANG_INGRESS_SCHEME:-https}"
 sglang_host="${SGLANG_INGRESS_HOST:-sglang.k8s-test}"
-models_url="http://${node_ip}:${ingress_port}/v1/models"
-if curl -sf --max-time 5 -H "Host: ${sglang_host}" "${models_url}" >/dev/null; then
+models_url="${ingress_scheme}://${node_ip}:${ingress_port}/v1/models"
+curl_opts=(-sf --max-time 5 -H "Host: ${sglang_host}")
+if [ "${ingress_scheme}" = https ]; then
+  curl_opts+=(--insecure)
+fi
+if curl "${curl_opts[@]}" "${models_url}" >/dev/null; then
   ok "HTTP reachable at ${models_url} (Host: ${sglang_host})"
 else
   warn "Could not reach ${models_url} with Host: ${sglang_host} (set NODE_IP /etc/hosts)"

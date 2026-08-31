@@ -91,10 +91,10 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: sglang-gemma4-12b
+  name: sglang-gemma4-31b
   namespace: llm-serving
   labels:
-    app.kubernetes.io/name: sglang-gemma4-12b
+    app.kubernetes.io/name: sglang-gemma4-31b
     app.kubernetes.io/component: ingress
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
@@ -112,7 +112,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: sglang-gemma4-12b
+                name: sglang-gemma4-31b
                 port:
                   number: 30000
 

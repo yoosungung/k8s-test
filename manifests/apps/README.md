@@ -6,7 +6,8 @@ This directory contains raw Kubernetes manifests for application workloads runni
 
 | Manifest | Namespace | Purpose | Verify script |
 | -------- | ----------- | ------- | ------------- |
-| `sglang-gemma4-12b.yaml` | `llm-serving` | Gemma 4 12B LLM (2× GPU) | `scripts/verify-sglang.sh` |
+| `sglang-gemma4-31b.yaml` | `llm-serving` | Gemma 4 31B AWQ LLM (tp=2, 2× GPU; active) | `scripts/verify-sglang.sh` |
+| `sglang-gemma4-12b.yaml` | `llm-serving` | Gemma 4 12B LLM (replicas=0 while 31B runs) | `SGLANG_DEPLOY=…12b` + verify |
 | `bge-m3-tei.yaml` | `llm-serving` | BAAI/bge-m3 dense embeddings (CPU TEI) | `scripts/test-bge-m3-tei-config.sh`, `scripts/verify-bge-m3-tei.sh` |
 | `ingress-routes.yaml` | various | Shared `*.k8s-test` Ingress routes managed by this repo (HTTPS :443) | `scripts/test-k8s-test-tls-config.sh`, `scripts/test-leantime-config.sh` |
 | `hermes-*.yaml` | `ai-agents` | Hermes agent stack | — |
