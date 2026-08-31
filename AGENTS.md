@@ -70,6 +70,7 @@ See **`README.md` → Recovery & troubleshooting** for full runbooks. Summary fo
 | `502` on `leantime.k8s-test/files/browse` | `browse.blade.php` `$module`/`$action` + menu `@include` / `get_defined_vars` OOM | README → Leantime → `/files/browse` patch; `./scripts/test-leantime-files-browse-fix.sh` |
 | `404` on `nebula-studio.k8s-test` | path-graph ingress not applied or wrong Host | Check the sibling path-graph repo/runbook; `qdrant.k8s-test` is not expected in `k8s-test` |
 | Hermes API `:8642` refused / `Gateway already running` | Stuck `hermes gateway restart` holds PID lock | `hermes gateway stop` in `hermes-master-0`; see README → Hermes gateway / API |
+| Hermes `Codex provider quota exhausted (429)` | ChatGPT/Codex OAuth window empty; empty `fallback_providers` | Add `openai-api` + `gpt-5.6-terra` fallback in `/opt/data/config.yaml`; see README → Hermes Codex quota |
 | Hermes dashboard `502` / `:9119` refused | Missing `HERMES_DASHBOARD_BASIC_AUTH_*` after image upgrade | Patch `hermes-gateway-secrets` + rollout STS; see README → Hermes dashboard 502 |
 | `ContainerStatusUnknown` / old `Error` pods | Leftovers after node/disk incidents | Delete stale pods per namespace; controllers recreate healthy replicas |
 | path-graph `*-resolve-manifest-*` `ImagePullBackOff` on `pipeline:0.0.0` | Stuck Argo probe/test Workflows (pod owned by Workflow) | `kubectl delete workflow -n path-graph <names>` — not pod-only; keep filestash; see README → path-graph Argo leftover |

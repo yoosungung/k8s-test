@@ -187,6 +187,23 @@ kubectl get secret hermes-gateway-secrets -n ai-agents \
   -o jsonpath='{.data.HERMES_DASHBOARD_BASIC_AUTH_PASSWORD}' | base64 -d; echo
 ```
 
+Default Codex inference model is **`gpt-5.6-terra`** (`HERMES_INFERENCE_PROVIDER=openai-codex`) in [`manifests/apps/hermes-master.yaml`](manifests/apps/hermes-master.yaml) and [`manifests/apps/hermes-wiki-master.yaml`](manifests/apps/hermes-wiki-master.yaml). The `bootstrap-model-config` init container writes `model.default` / `model.provider` into `/opt/data/config.yaml` on every pod start. After changing the env values, re-apply the manifests and restart the StatefulSets:
+
+```bash
+kubectl apply -f manifests/apps/hermes-master.yaml -f manifests/apps/hermes-wiki-master.yaml
+kubectl rollout restart sts/hermes-master sts/hermes-wiki-master -n ai-agents
+kubectl rollout status sts/hermes-master -n ai-agents --timeout=300s
+```
+
+When ChatGPT/Codex subscription quota is exhausted, keep Codex as primary and set an API-key fallback in the pod PVC config (survives restarts; not overwritten by bootstrap):
+
+```yaml
+# /opt/data/config.yaml (hermes-master / hermes-wiki-master)
+fallback_providers:
+  - provider: openai-api
+    model: gpt-5.6-terra
+```
+
 ### Clean Up / Teardown
 
 To remove all components and clean up the namespaces created for testing:
@@ -221,6 +238,33 @@ kubectl rollout restart deployment/agent-pool-compiled-graph -n runtime
 # Re-run intercept after the new pod is Ready
 telepresence intercept agent-pool-compiled-graph --port 8080:8080
 ```
+
+### Hermes Codex quota exhausted (`429` / `usage_limit_reached`)
+
+**Symptoms**
+
+- Gateway: `Primary provider rate-limited (429): Codex provider quota exhausted … — trying fallback`
+- Then `RuntimeError: Codex provider quota exhausted (429); retry after …s` (no working fallback)
+- `auth.json` credential pool entry `openai-codex` has `last_status: exhausted`
+
+**Cause:** ChatGPT/Codex OAuth subscription window is empty. Credentials stay valid; Hermes blocks until `last_error_reset_at` (often ~hours–days). Empty `fallback_providers` means the “trying fallback” path has nowhere to go.
+
+**Fix:** Keep primary `openai-codex` + `gpt-5.6-terra`, and add API-key fallback (uses `OPENAI_API_KEY` from `hermes-gateway-secrets`):
+
+```bash
+kubectl exec -n ai-agents hermes-master-0 -c hermes-master -- python3 - <<'PY'
+import yaml
+from pathlib import Path
+path = Path("/opt/data/config.yaml")
+cfg = yaml.safe_load(path.read_text()) or {}
+cfg["fallback_providers"] = [{"provider": "openai-api", "model": "gpt-5.6-terra"}]
+path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True))
+print(cfg["fallback_providers"])
+PY
+# optional: same on hermes-wiki-master-0
+```
+
+Gateway re-reads `fallback_providers` from disk on the next request (no full STS restart required). After Codex resets, primary resumes automatically; leave the fallback in place for the next quota window.
 
 ### Hermes gateway / API (`:8642`) stuck
 
@@ -1081,7 +1125,6 @@ SGLANG_DEPLOY=sglang-gemma4-12b SGLANG_MIN_REPLICAS=2 \
 ```
 
 After deploy, confirm: `max_total_num_tokens` ≫ 8192, no `Truncated` in logs, and `./scripts/verify-sglang.sh` passes the tool-call probe.
-
 ---
 
 ## Directory Reference

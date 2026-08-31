@@ -76,7 +76,7 @@ spec:
             - name: HERMES_HOME
               value: "/opt/data"
             - name: HERMES_INFERENCE_MODEL
-              value: "gpt-5.5"
+              value: "gpt-5.6-terra"
             - name: HERMES_INFERENCE_PROVIDER
               value: "openai-codex"
             - name: CUSTOM_BASE_URL
@@ -138,7 +138,7 @@ spec:
                   key: HERMES_API_SERVER_KEY
             # LLM inference via OpenAI Codex
             - name: HERMES_INFERENCE_MODEL
-              value: "gpt-5.5"
+              value: "gpt-5.6-terra"
             - name: HERMES_INFERENCE_PROVIDER
               value: "openai-codex"
             - name: CUSTOM_BASE_URL
